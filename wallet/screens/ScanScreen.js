@@ -22,6 +22,19 @@ export default function ScanScreen({ navigation }) {
     try {
       const ack = JSON.parse(data);
 
+      if (ack?.type === 'offline-signed-transaction') {
+        Alert.alert(
+          'Signed Transaction Detected',
+          'This QR contains a signed transaction for the relayer. Please share it with the relayer device to broadcast.',
+          [{ text: 'OK', onPress: () => setScanned(false) }]
+        );
+        return;
+      }
+
+      if (!ack || !ack.txHash) {
+        throw new Error('Missing acknowledgement payload fields.');
+      }
+
       // 1. Verify the signature
       const isVerified = verifyAck(ack);
 
