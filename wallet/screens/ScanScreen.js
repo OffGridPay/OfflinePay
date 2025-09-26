@@ -1,24 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Text, View, StyleSheet, Button, Alert } from 'react-native';
-import { Camera } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useIsFocused } from '@react-navigation/native';
 
 import { verifyAck } from '../utils/verifyAck';
 import { saveAck } from '../utils/db';
 
 export default function ScanScreen({ navigation }) {
-  const [hasPermission, setHasPermission] = useState(null);
   const [scanned, setScanned] = useState(false);
   const isFocused = useIsFocused();
+  const [permission, requestPermission] = useCameraPermissions();
 
   useEffect(() => {
-    const getCameraPermissions = async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
-    };
-
-    getCameraPermissions();
-  }, []);
+    if (!permission) {
+      requestPermission();
+    }
+  }, [permission, requestPermission]);
 
   const handleBarCodeScanned = async ({ type, data }) => {
     setScanned(true);
@@ -53,18 +50,25 @@ export default function ScanScreen({ navigation }) {
     }
   };
 
-  if (hasPermission === null) {
+  if (!permission) {
     return <Text>Requesting for camera permission</Text>;
   }
-  if (hasPermission === false) {
-    return <Text>No access to camera</Text>;
+  if (!permission.granted) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.permissionText}>Camera access is required to scan acknowledgements.</Text>
+        <Button title="Grant Permission" onPress={requestPermission} />
+      </View>
+    );
   }
 
   return (
     <View style={styles.container}>
       {isFocused && (
-        <Camera
-          onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
+        <CameraView
+          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          facing="back"
           style={StyleSheet.absoluteFillObject}
         />
       )}
@@ -78,5 +82,15 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'column',
     justifyContent: 'center',
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  permissionText: {
+    textAlign: 'center',
+    marginBottom: 20,
   },
 });

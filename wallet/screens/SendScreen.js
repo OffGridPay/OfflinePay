@@ -7,7 +7,7 @@ import { fetchWallet, fetchAcks } from '../utils/db';
 export default function SendScreen({ navigation }) {
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
-  const [signedTx, setSignedTx] = useState(null);
+  const [qrData, setQrData] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const handleGenerateQR = async () => {
@@ -21,11 +21,15 @@ export default function SendScreen({ navigation }) {
     }
 
     setLoading(true);
-    setSignedTx(null);
+    setQrData(null);
 
     try {
       // 1. Fetch wallet and determine nonce
       const walletData = await fetchWallet();
+      if (!walletData) {
+        Alert.alert('Wallet Missing', 'Create or import a wallet before sending transactions.');
+        return;
+      }
       const acks = await fetchAcks();
       const nonce = acks.length; // Use the number of past successful txs as nonce
 
@@ -42,7 +46,22 @@ export default function SendScreen({ navigation }) {
 
       // 3. Sign the transaction
       const signedTxHex = await wallet.signTransaction(tx);
-      setSignedTx(signedTxHex);
+      const payload = {
+        version: 1,
+        type: 'offline-signed-transaction',
+        signedTx: signedTxHex,
+        metadata: {
+          from: wallet.address,
+          to: recipient,
+          amountEth: amount,
+          nonce,
+          gasLimit: String(tx.gasLimit),
+          gasPriceGwei: ethers.utils.formatUnits(tx.gasPrice, 'gwei'),
+          createdAt: new Date().toISOString(),
+        },
+      };
+
+      setQrData(payload);
 
     } catch (error) {
       Alert.alert('Transaction Error', 'Could not create signed transaction.');
@@ -54,7 +73,7 @@ export default function SendScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      {!signedTx ? (
+      {!qrData ? (
         <>
           <Text style={styles.label}>Recipient Address</Text>
           <TextInput
@@ -81,10 +100,29 @@ export default function SendScreen({ navigation }) {
         <View style={styles.qrContainer}>
           <Text style={styles.qrHeader}>Show this QR to the Relayer</Text>
           <QRCode
-            value={signedTx}
+            value={JSON.stringify(qrData)}
             size={300}
           />
-          <Button title="Done" onPress={() => navigation.goBack()} />
+          <View style={styles.summaryBox}>
+            <Text style={styles.summaryTitle}>Transaction Summary</Text>
+            <Text selectable style={styles.summaryText}>From: {qrData.metadata.from}</Text>
+            <Text selectable style={styles.summaryText}>To: {qrData.metadata.to}</Text>
+            <Text style={styles.summaryText}>Amount: {qrData.metadata.amountEth} ETH</Text>
+            <Text style={styles.summaryText}>Nonce: {qrData.metadata.nonce}</Text>
+            <Text style={styles.summaryText}>Gas: {qrData.metadata.gasLimit} @ {qrData.metadata.gasPriceGwei} gwei</Text>
+          </View>
+          <View style={styles.actionButtons}>
+            <Button title="Done" onPress={() => navigation.goBack()} />
+            <View style={styles.buttonSpacer} />
+            <Button
+              title="Generate Another"
+              onPress={() => {
+                setQrData(null);
+                setRecipient('');
+                setAmount('');
+              }}
+            />
+          </View>
         </View>
       )}
     </View>
@@ -118,5 +156,30 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 20,
+  },
+  summaryBox: {
+    width: '100%',
+    marginTop: 20,
+    marginBottom: 20,
+    padding: 15,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
+  summaryTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  summaryText: {
+    fontSize: 14,
+    marginBottom: 6,
+  },
+  actionButtons: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  buttonSpacer: {
+    width: 10,
   },
 });
