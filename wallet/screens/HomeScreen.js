@@ -1,14 +1,36 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, Button, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, Button, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchWallet, fetchAcks } from '../utils/db';
 import { ethers } from 'ethers';
+import { useConnectivity } from '../context/ConnectivityContext';
+
+function getConnectivityBadgeStyle(connectivity) {
+  const base = {
+    alignSelf: 'flex-start',
+    borderRadius: 20,
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+  };
+
+  if (!connectivity?.isConnected) {
+    return { ...base, backgroundColor: '#ef4444' };
+  }
+
+  if (connectivity?.isInternetReachable) {
+    return { ...base, backgroundColor: '#22c55e' };
+  }
+
+  return { ...base, backgroundColor: '#f97316' };
+}
 
 export default function HomeScreen({ navigation }) {
   const [wallet, setWallet] = useState(null);
   const [balance, setBalance] = useState('0.0');
   const [acks, setAcks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const connectivity = useConnectivity();
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -72,7 +94,31 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.actions}>
         <Button title="Send" onPress={() => navigation.navigate('Send')} />
         <Button title="Scan to Receive" onPress={() => navigation.navigate('Scan')} />
+        <Button title="BLE Debug" onPress={() => navigation.navigate('BleDebug')} />
       </View>
+
+      <TouchableOpacity style={styles.connectivityCard} onPress={connectivity.triggerHeartbeatCheck}>
+        <View style={getConnectivityBadgeStyle(connectivity)}>
+          <Text style={styles.connectivityBadgeText}>
+            {connectivity.isConnected ? (connectivity.isInternetReachable ? 'Online Relayer' : 'Limited Connection') : 'Offline Device'}
+          </Text>
+        </View>
+        <Text style={styles.connectivitySubtext}>
+          Connection: {connectivity.connectionType}
+        </Text>
+        <Text style={styles.connectivitySubtext}>
+          Last update: {connectivity.lastChangedAt ? new Date(connectivity.lastChangedAt).toLocaleTimeString() : '—'}
+        </Text>
+        {connectivity.heartbeat.url ? (
+          <Text style={styles.connectivitySubtext}>
+            Relayer check: {connectivity.heartbeat.status} {connectivity.heartbeat.latencyMs ? `(${connectivity.heartbeat.latencyMs}ms)` : ''}
+          </Text>
+        ) : (
+          <Text style={styles.connectivitySubtext}>
+            Heartbeat not configured
+          </Text>
+        )}
+      </TouchableOpacity>
 
       <Text style={styles.historyTitle}>Transaction History</Text>
       {acks.length === 0 ? (
@@ -98,6 +144,23 @@ const styles = StyleSheet.create({
   balanceLabel: { fontSize: 20, color: '#333' },
   balance: { fontSize: 36, fontWeight: 'bold' },
   actions: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 20 },
+  connectivityCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 10,
+    marginBottom: 20,
+  },
+  connectivityBadgeText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  connectivitySubtext: {
+    color: '#cbd5f5',
+    fontSize: 12,
+    marginTop: 2,
+  },
   historyTitle: { fontSize: 22, fontWeight: 'bold', marginLeft: 10, marginBottom: 10 },
   txList: { flex: 1 },
   txItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },

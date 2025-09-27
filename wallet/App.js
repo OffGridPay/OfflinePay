@@ -8,14 +8,22 @@ import WalletSetupScreen from './screens/WalletSetupScreen';
 import HomeScreen from './screens/HomeScreen';
 import SendScreen from './screens/SendScreen';
 import ScanScreen from './screens/ScanScreen';
+import BleDebugScreen from './screens/BleDebugScreen';
 
 import { init as initDB, fetchWallet } from './utils/db';
+import useConnectivityMonitor from './hooks/useConnectivityMonitor';
+import ConnectivityContext from './context/ConnectivityContext';
+import { RELAYER_HEALTHCHECK_URL } from './config/env';
 
 const Stack = createStackNavigator();
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasWallet, setHasWallet] = useState(false);
+  const connectivity = useConnectivityMonitor({
+    heartbeatUrl: RELAYER_HEALTHCHECK_URL,
+    autoStartHeartbeat: true,
+  });
 
   useEffect(() => {
     const setup = async () => {
@@ -42,8 +50,9 @@ export default function App() {
   }
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName={hasWallet ? 'Home' : 'WalletSetup'}>
+    <ConnectivityContext.Provider value={connectivity}>
+      <NavigationContainer>
+        <Stack.Navigator initialRouteName={hasWallet ? 'Home' : 'WalletSetup'}>
         <Stack.Screen 
           name="WalletSetup" 
           component={WalletSetupScreen} 
@@ -59,13 +68,19 @@ export default function App() {
           component={SendScreen} 
           options={{ title: 'Send Transaction' }}
         />
-        <Stack.Screen 
-          name="Scan" 
-          component={ScanScreen} 
-          options={{ title: 'Scan QR Code' }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
+          <Stack.Screen 
+            name="Scan" 
+            component={ScanScreen} 
+            options={{ title: 'Scan QR Code' }}
+          />
+          <Stack.Screen
+            name="BleDebug"
+            component={BleDebugScreen}
+            options={{ title: 'BLE Debug' }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </ConnectivityContext.Provider>
   );
 }
 
