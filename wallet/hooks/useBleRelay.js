@@ -164,6 +164,63 @@ export default function useBleRelay(options = {}) {
     }
   }, [logger]);
 
+  const initiateHandshake = useCallback(async (peerId) => {
+    const service = serviceRef.current;
+    if (!service?.initiateHandshake) {
+      logger.warn('[ble-relay-hook] initiateHandshake unavailable');
+      setError('Handshake service unavailable');
+      return null;
+    }
+    try {
+      return await service.initiateHandshake(peerId);
+    } catch (handshakeError) {
+      logger.error('[ble-relay-hook] initiateHandshake failed:', handshakeError);
+      setError(handshakeError.message || 'Handshake initiation failed');
+      throw handshakeError;
+    }
+  }, [logger]);
+
+  const processIncomingHandshake = useCallback(async (peerId, initMessage) => {
+    const service = serviceRef.current;
+    if (!service?.processIncomingHandshake) {
+      logger.warn('[ble-relay-hook] processIncomingHandshake unavailable');
+      setError('Handshake service unavailable');
+      return null;
+    }
+    try {
+      return await service.processIncomingHandshake(peerId, initMessage);
+    } catch (handshakeError) {
+      logger.error('[ble-relay-hook] processIncomingHandshake failed:', handshakeError);
+      setError(handshakeError.message || 'Handshake processing failed');
+      throw handshakeError;
+    }
+  }, [logger]);
+
+  const completeHandshake = useCallback(async (peerId, responseMessage, contextId) => {
+    const service = serviceRef.current;
+    if (!service?.completeHandshake) {
+      logger.warn('[ble-relay-hook] completeHandshake unavailable');
+      setError('Handshake service unavailable');
+      return null;
+    }
+    try {
+      return await service.completeHandshake(peerId, responseMessage, contextId);
+    } catch (handshakeError) {
+      logger.error('[ble-relay-hook] completeHandshake failed:', handshakeError);
+      setError(handshakeError.message || 'Handshake completion failed');
+      throw handshakeError;
+    }
+  }, [logger]);
+
+  const cancelHandshake = useCallback((contextId, reason) => {
+    const service = serviceRef.current;
+    if (!service?.cancelHandshake) {
+      logger.warn('[ble-relay-hook] cancelHandshake unavailable');
+      return false;
+    }
+    return service.cancelHandshake(contextId, reason);
+  }, [logger]);
+
   // Load wallet on hook mount
   useEffect(() => {
     fetchWallet()
@@ -236,10 +293,10 @@ export default function useBleRelay(options = {}) {
     sessions,
     startScanning,
     stopScanning,
-    initiateHandshake: serviceRef.current?.initiateHandshake?.bind(serviceRef.current) || null,
-    processIncomingHandshake: serviceRef.current?.processIncomingHandshake?.bind(serviceRef.current) || null,
-    completeHandshake: serviceRef.current?.completeHandshake?.bind(serviceRef.current) || null,
-    cancelHandshake: serviceRef.current?.cancelHandshake?.bind(serviceRef.current) || null,
+    initiateHandshake,
+    processIncomingHandshake,
+    completeHandshake,
+    cancelHandshake,
     service: serviceRef.current,
   };
 }
