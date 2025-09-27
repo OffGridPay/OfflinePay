@@ -400,6 +400,26 @@ export default function HomeScreen({ navigation }) {
               style={styles.bleActionButton}
             />
           </View>
+          {bleRelay.handshakeContexts.length > 0 && (
+            <View style={styles.handshakeContainer}>
+              <Text style={styles.detailText}>Active handshakes:</Text>
+              {bleRelay.handshakeContexts.map((ctx) => (
+                <Text key={ctx.contextId} style={styles.detailText}>
+                  · {ctx.peerId.slice(0, 8)}… (started {new Date(ctx.startedAt).toLocaleTimeString()})
+                </Text>
+              ))}
+            </View>
+          )}
+          {bleRelay.sessions.length > 0 && (
+            <View style={styles.handshakeContainer}>
+              <Text style={styles.detailText}>Active sessions:</Text>
+              {bleRelay.sessions.map((session) => (
+                <Text key={session.sessionId} style={styles.detailText}>
+                  · {session.peerId.slice(0, 8)}… ({session.role})
+                </Text>
+              ))}
+            </View>
+          )}
         </CustomCard>
       )}
 
@@ -494,6 +514,9 @@ const styles = StyleSheet.create({
   },
   bleActionButton: {
     flex: 0.48,
+  },
+  handshakeContainer: {
+    marginTop: theme.spacing.md,
   },
   historyTitle: {
     fontSize: theme.typography.h2.fontSize,

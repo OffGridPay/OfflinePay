@@ -6,6 +6,14 @@
 import { Platform, PermissionsAndroid } from 'react-native';
 import { Buffer } from 'buffer';
 
+import {
+  createHandshakeInit,
+  processHandshakeInit,
+  completeHandshake,
+  establishSession,
+} from '../utils/cryptoHandshake';
+import { generateSessionId } from '../utils/payloadSerializer';
+
 let BlePlx;
 try {
   BlePlx = require('react-native-ble-plx');
@@ -28,18 +36,22 @@ export const DEVICE_ROLES = {
 
 const DEFAULT_PEER_STALE_MS = 15000;
 const PEER_MAINTENANCE_INTERVAL_MS = 5000;
+const HANDSHAKE_TIMEOUT_MS = 20000;
 
 export class BleRelayerService {
   constructor(options = {}) {
     this.logger = options.logger || console;
     this.walletAddress = options.walletAddress || null;
+    this.walletPrivateKey = options.walletPrivateKey || null;
     this.peerStaleMs = options.peerStaleMs || DEFAULT_PEER_STALE_MS;
+    this.handshakeTimeoutMs = options.handshakeTimeoutMs || HANDSHAKE_TIMEOUT_MS;
     this.manager = null;
     this.isAdvertising = false;
     this.isScanning = false;
     this.deviceRole = DEVICE_ROLES.OFFLINE;
     this.nearbyPeers = new Map(); // deviceId -> peerInfo
     this.sessions = new Map(); // sessionId -> sessionInfo
+    this.handshakeContexts = new Map(); // contextId -> handshake state
     this.peerMaintenanceTimer = null;
     this.selectedRelayerId = null;
     
@@ -49,7 +61,18 @@ export class BleRelayerService {
       roleChanged: [],
       sessionEstablished: [],
       relayerSelected: [],
+      handshakeInitiated: [],
+      handshakeFailed: [],
     };
+  }
+
+  updateWalletCredentials({ walletAddress, walletPrivateKey }) {
+    if (walletAddress) {
+      this.walletAddress = walletAddress;
+    }
+    if (walletPrivateKey) {
+      this.walletPrivateKey = walletPrivateKey;
+    }
   }
 
   async initialize() {
@@ -281,6 +304,7 @@ export class BleRelayerService {
 
     this.nearbyPeers.clear();
     this.sessions.clear();
+    this.handshakeContexts.clear();
     this.logger.info('[ble-relay] service destroyed');
   }
 
@@ -433,6 +457,193 @@ export class BleRelayerService {
       }
     });
   }
+
+  // Handshake orchestration
+
+  async initiateHandshake(peerId) {
+    if (!this.walletPrivateKey) {
+      throw new Error('Wallet private key unavailable for handshake');
+    }
+
+    const peerInfo = this.nearbyPeers.get(peerId);
+    if (!peerInfo) {
+      throw new Error('Peer not found');
+    }
+
+    const contextId = generateSessionId();
+    const handshakeSessionId = generateSessionId();
+
+    try {
+      const { message, ephemeralPrivateKey } = await createHandshakeInit(
+        this.walletPrivateKey,
+        this.deviceRole,
+      );
+
+      const context = {
+        id: contextId,
+        peerId,
+        handshakeSessionId,
+        message,
+        ephemeralPrivateKey,
+        createdAt: Date.now(),
+        timeout: setTimeout(() => {
+          this._expireHandshake(contextId);
+        }, this.handshakeTimeoutMs),
+      };
+
+      this.handshakeContexts.set(contextId, context);
+      this._notifySubscribers('handshakeInitiated', { peerId, contextId, message });
+
+      return { peerInfo, contextId, message };
+    } catch (error) {
+      this.logger.error('[ble-relay] handshake initiation failed:', error);
+      this._notifySubscribers('handshakeFailed', { peerId, error });
+      throw error;
+    }
+  }
+
+  async completeHandshake(peerId, responseMessage, contextId) {
+    const context = contextId ? this.handshakeContexts.get(contextId) : null;
+
+    if (!context) {
+      throw new Error('Handshake context not found');
+    }
+
+    try {
+      const { sharedSecret, peerAddress, peerRole } = completeHandshake(
+        responseMessage,
+        context.ephemeralPrivateKey,
+        context.message.challenge,
+      );
+
+      const session = establishSession(sharedSecret, context.handshakeSessionId, {
+        peerId,
+        peerAddress,
+        peerRole,
+        role: 'initiator',
+      });
+
+      this.sessions.set(session.sessionId, {
+        ...session,
+        peerId,
+        peerAddress,
+        peerRole,
+        role: 'initiator',
+      });
+
+      this._clearHandshakeContext(contextId);
+      this._notifySubscribers('sessionEstablished', {
+        peerId,
+        session: this.sessions.get(session.sessionId),
+        role: 'initiator',
+        contextId,
+      });
+
+      return { session: this.sessions.get(session.sessionId), peerAddress };
+    } catch (error) {
+      this.logger.error('[ble-relay] handshake completion failed:', error);
+      this._clearHandshakeContext(contextId);
+      this._notifySubscribers('handshakeFailed', { peerId, contextId, error });
+      throw error;
+    }
+  }
+
+  async processIncomingHandshake(peerId, initMessage) {
+    if (!this.walletPrivateKey) {
+      throw new Error('Wallet private key unavailable for handshake');
+    }
+
+    try {
+      const { response, sharedSecret, peerAddress, ephemeralPrivateKey } = await processHandshakeInit(
+        initMessage,
+        this.walletPrivateKey,
+        this.deviceRole,
+      );
+
+      const handshakeSessionId = generateSessionId();
+
+      const session = establishSession(sharedSecret, handshakeSessionId, {
+        peerId,
+        peerAddress,
+        peerRole: initMessage.deviceRole,
+        role: 'responder',
+      });
+
+      this.sessions.set(session.sessionId, {
+        ...session,
+        peerId,
+        peerAddress,
+        peerRole: initMessage.deviceRole,
+        role: 'responder',
+        ephemeralPrivateKey,
+      });
+
+      this._notifySubscribers('sessionEstablished', {
+        peerId,
+        session: this.sessions.get(session.sessionId),
+        role: 'responder',
+        responseMessage: response,
+      });
+
+      return { response, session: this.sessions.get(session.sessionId) };
+    } catch (error) {
+      this.logger.error('[ble-relay] failed to process incoming handshake:', error);
+      this._notifySubscribers('handshakeFailed', { peerId, error });
+      throw error;
+    }
+  }
+
+  cancelHandshake(contextId, reason = 'cancelled') {
+    const context = this.handshakeContexts.get(contextId);
+    if (!context) {
+      return false;
+    }
+
+    this._clearHandshakeContext(contextId);
+    this._notifySubscribers('handshakeFailed', {
+      peerId: context.peerId,
+      contextId,
+      error: new Error(`Handshake ${reason}`),
+    });
+    return true;
+  }
+
+  getActiveSessions() {
+    return Array.from(this.sessions.values());
+  }
+
+  getSessionByPeer(peerId) {
+    return Array.from(this.sessions.values()).find((session) => session.peerId === peerId) || null;
+  }
+
+  _expireHandshake(contextId) {
+    const context = this.handshakeContexts.get(contextId);
+    if (!context) {
+      return;
+    }
+
+    this.logger.warn('[ble-relay] handshake timed out', { peerId: context.peerId });
+    this._clearHandshakeContext(contextId);
+    this._notifySubscribers('handshakeFailed', {
+      peerId: context.peerId,
+      contextId,
+      error: new Error('Handshake timeout'),
+    });
+  }
+
+  _clearHandshakeContext(contextId) {
+    const context = this.handshakeContexts.get(contextId);
+    if (!context) {
+      return;
+    }
+
+    if (context.timeout) {
+      clearTimeout(context.timeout);
+    }
+
+    this.handshakeContexts.delete(contextId);
+  }
+
 }
 
 export default BleRelayerService;

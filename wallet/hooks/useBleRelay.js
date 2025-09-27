@@ -22,6 +22,9 @@ export default function useBleRelay(options = {}) {
   const [selectedRelayer, setSelectedRelayer] = useState(null);
   const [relayerRole, setRelayerRole] = useState({ isOnline: false, canRelay: false });
   const [isScanning, setIsScanning] = useState(false);
+  const [handshakeContexts, setHandshakeContexts] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [handshakeErrors, setHandshakeErrors] = useState([]);
 
   // Initialize the service
   const initializeService = useCallback(async () => {
@@ -30,6 +33,7 @@ export default function useBleRelay(options = {}) {
     try {
       const service = new BleRelayerService({
         walletAddress: wallet.address,
+        walletPrivateKey: wallet.privateKey,
         logger,
       });
 
@@ -59,16 +63,39 @@ export default function useBleRelay(options = {}) {
         logger.info('[ble-relay-hook] role updated:', { isOnline, canRelay });
       };
 
+      const handleHandshakeInitiated = ({ peerId, contextId, message }) => {
+        setHandshakeContexts((prev) => [{ peerId, contextId, message, startedAt: Date.now() }, ...prev]);
+      };
+
+      const handleHandshakeFailed = ({ peerId, contextId, error }) => {
+        setHandshakeErrors((prev) => [{ peerId, contextId, error, occurredAt: Date.now() }, ...prev.slice(0, 4)]);
+        setHandshakeContexts((prev) => prev.filter((ctx) => ctx.contextId !== contextId));
+      };
+
+      const handleSessionEstablished = ({ peerId, session, role }) => {
+        setHandshakeContexts((prev) => prev.filter((ctx) => ctx.peerId !== peerId));
+        setSessions((prev) => {
+          const filtered = prev.filter((existing) => existing.sessionId !== session.sessionId);
+          return [{ ...session, role }, ...filtered];
+        });
+      };
+
       service.subscribe('peerDiscovered', handlePeerDiscovered);
       service.subscribe('peerLost', handlePeerLost);
       service.subscribe('relayerSelected', handleRelayerSelected);
       service.subscribe('roleChanged', roleChangedHandler);
+      service.subscribe('handshakeInitiated', handleHandshakeInitiated);
+      service.subscribe('handshakeFailed', handleHandshakeFailed);
+      service.subscribe('sessionEstablished', handleSessionEstablished);
 
       subscriptionsRef.current = [
         { event: 'peerDiscovered', handler: handlePeerDiscovered },
         { event: 'peerLost', handler: handlePeerLost },
         { event: 'relayerSelected', handler: handleRelayerSelected },
         { event: 'roleChanged', handler: roleChangedHandler },
+        { event: 'handshakeInitiated', handler: handleHandshakeInitiated },
+        { event: 'handshakeFailed', handler: handleHandshakeFailed },
+        { event: 'sessionEstablished', handler: handleSessionEstablished },
       ];
 
       serviceRef.current = service;
@@ -152,10 +179,20 @@ export default function useBleRelay(options = {}) {
 
   // Initialize service when wallet is loaded
   useEffect(() => {
-    if (wallet && autoStart) {
-      initializeService();
+    if (!wallet) {
+      return;
     }
-  }, [wallet, autoStart, initializeService]);
+
+    if (serviceRef.current) {
+      serviceRef.current.updateWalletCredentials?.({
+        walletAddress: wallet.address,
+        walletPrivateKey: wallet.privateKey,
+      });
+      return;
+    }
+
+    initializeService();
+  }, [wallet, initializeService]);
 
   // Update role when connectivity changes
   useEffect(() => {
@@ -194,8 +231,15 @@ export default function useBleRelay(options = {}) {
     relayerRole,
     selectedRelayer,
     isScanning,
+    handshakeContexts,
+    handshakeErrors,
+    sessions,
     startScanning,
     stopScanning,
+    initiateHandshake: serviceRef.current?.initiateHandshake?.bind(serviceRef.current) || null,
+    processIncomingHandshake: serviceRef.current?.processIncomingHandshake?.bind(serviceRef.current) || null,
+    completeHandshake: serviceRef.current?.completeHandshake?.bind(serviceRef.current) || null,
+    cancelHandshake: serviceRef.current?.cancelHandshake?.bind(serviceRef.current) || null,
     service: serviceRef.current,
   };
 }

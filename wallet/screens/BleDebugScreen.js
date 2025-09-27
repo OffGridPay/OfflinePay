@@ -105,6 +105,47 @@ export default function BleDebugScreen() {
           <Text style={styles.deviceDetail}>None</Text>
         )}
       </CustomCard>
+      <CustomCard>
+        <Text style={styles.sectionTitle}>Handshakes</Text>
+        {ble.handshakeContexts.length === 0 ? (
+          <Text style={styles.deviceDetail}>No active handshakes.</Text>
+        ) : (
+          ble.handshakeContexts.map((ctx) => (
+            <View key={ctx.contextId} style={styles.handshakeRow}>
+              <Text style={styles.deviceDetail}>Peer: {ctx.peerId.slice(0, 10)}…</Text>
+              <Text style={styles.deviceDetail}>
+                Started: {new Date(ctx.startedAt).toLocaleTimeString()}
+              </Text>
+            </View>
+          ))
+        )}
+        {ble.handshakeErrors.length > 0 && (
+          <View style={styles.errorList}>
+            <Text style={styles.deviceDetail}>Recent handshake errors:</Text>
+            {ble.handshakeErrors.map((item, index) => (
+              <Text key={`${item.contextId}-${index}`} style={styles.errorText}>
+                · {item.peerId.slice(0, 10)}… — {item.error?.message || 'Unknown error'}
+              </Text>
+            ))}
+          </View>
+        )}
+      </CustomCard>
+      <CustomCard>
+        <Text style={styles.sectionTitle}>Sessions</Text>
+        {ble.sessions.length === 0 ? (
+          <Text style={styles.deviceDetail}>No active sessions.</Text>
+        ) : (
+          ble.sessions.map((session) => (
+            <View key={session.sessionId} style={styles.handshakeRow}>
+              <Text style={styles.deviceDetail}>Peer: {session.peerId.slice(0, 10)}…</Text>
+              <Text style={styles.deviceDetail}>Role: {session.role}</Text>
+              <Text style={styles.deviceDetail}>
+                Established: {new Date(session.createdAt).toLocaleTimeString()}
+              </Text>
+            </View>
+          ))
+        )}
+      </CustomCard>
     </ScrollView>
   )
 }
@@ -180,5 +221,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: theme.colors.textSecondary,
     padding: theme.spacing.xl,
+  },
+  handshakeRow: {
+    marginBottom: theme.spacing.sm,
+  },
+  errorList: {
+    marginTop: theme.spacing.sm,
   },
 })
