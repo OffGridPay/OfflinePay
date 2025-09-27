@@ -25,7 +25,7 @@ import {
   PAYLOAD_TYPES 
 } from '../utils/payloadSerializer';
 import { relayerApi } from './RelayerApiService';
-import { saveBleAck, saveBleTransaction } from '../utils/db';
+import { saveBleAck, saveBleTransaction, upsertBalanceSnapshot } from '../utils/db';
 
 let BlePlx;
 try {
@@ -1290,7 +1290,6 @@ export class BleRelayerService {
 
       // Save balance snapshot to database (T2.7 - FR-32)
       try {
-        const { upsertBalanceSnapshot } = await import('../utils/db');
         await upsertBalanceSnapshot({
           walletAddress: payload.walletAddress,
           nativeBalance: {

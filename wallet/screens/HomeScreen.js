@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchWallet, fetchAcks, fetchLatestBalanceSnapshot, upsertBalanceSnapshot, purgeOldBalanceSnapshots } from '../utils/db';
 import { ethers } from 'ethers';
 import { useConnectivity } from '../context/ConnectivityContext';
-import useBleRelay from '../hooks/useBleRelay';
+import useSimpleBle from '../hooks/useSimpleBle';
 import { RELAYER_BASE_URL } from '../config/env';
 import CustomCard from '../components/CustomCard';
 import CustomButton from '../components/CustomButton';
@@ -144,18 +144,18 @@ export default function HomeScreen({ navigation }) {
   const [acks, setAcks] = useState([]);
   const [loading, setLoading] = useState(true);
   const connectivity = useConnectivity();
-  const bleRelay = useBleRelay({ autoStart: true });
+  const bleRelay = useSimpleBle({ autoStart: true });
 
   // Debug logging for BLE relay state
   useEffect(() => {
     console.log('[HomeScreen] BLE relay state:', {
-      isSupported: bleRelay.isSupported,
       isInitialized: bleRelay.isInitialized,
       error: bleRelay.error,
-      peers: bleRelay.peers.length,
-      relayerRole: bleRelay.relayerRole,
+      discoveredDevices: bleRelay.discoveredDevices.length,
+      connectedDevices: bleRelay.connectedDevices.length,
+      bluetoothState: bleRelay.bluetoothState,
     });
-  }, [bleRelay.isSupported, bleRelay.isInitialized, bleRelay.error, bleRelay.peers.length, bleRelay.relayerRole]);
+  }, [bleRelay.isInitialized, bleRelay.error, bleRelay.discoveredDevices.length, bleRelay.connectedDevices.length, bleRelay.bluetoothState]);
 
   const applySnapshotToState = useCallback((snapshot, sourceOverride) => {
     const parsed = extractBalanceFromSnapshot(snapshot);
@@ -346,91 +346,52 @@ export default function HomeScreen({ navigation }) {
       </TouchableOpacity>
 
       {/* BLE Relay Card */}
-      {bleRelay.isSupported && (
+      {bleRelay.isInitialized && (
         <CustomCard
           variant={
-            bleRelay.relayerRole.canRelay
+            bleRelay.bluetoothState === 'PoweredOn'
               ? "success"
-              : bleRelay.relayerRole.isOnline
-              ? "info"
               : "error"
           }
         >
-          <Text style={styles.cardTitle}>BLE Mesh Network</Text>
+          <Text style={styles.cardTitle}>BLE Device Scanner</Text>
           <View style={styles.bleStatusRow}>
             <Text style={styles.bleStatusLabel}>Status:</Text>
             <View
               style={[
                 styles.bleStatusBadge,
                 {
-                  backgroundColor: bleRelay.relayerRole.canRelay
-                    ? theme.colors.bleActive
-                    : bleRelay.relayerRole.isOnline
-                    ? theme.colors.bleOnline
-                    : theme.colors.bleOffline,
+                  backgroundColor: bleRelay.bluetoothState === 'PoweredOn'
+                    ? theme.colors.success || '#4CAF50'
+                    : theme.colors.error || '#F44336',
                 },
               ]}
             >
               <Text style={styles.bleStatusText}>
-                {bleRelay.relayerRole.canRelay
-                  ? "Active Relayer"
-                  : bleRelay.relayerRole.isOnline
-                  ? "Online"
-                  : "Offline"}
+                {bleRelay.bluetoothState === 'PoweredOn'
+                  ? "Ready"
+                  : bleRelay.bluetoothState}
               </Text>
             </View>
           </View>
           <Text style={styles.detailText}>
-            Nearby peers: {bleRelay.peers.length} | Relayers: {bleRelay.relayerPeers.length}
+            Discovered: {bleRelay.discoveredDevices.length} | Connected: {bleRelay.connectedDevices.length}
           </Text>
-          {bleRelay.selectedRelayer ? (
-            <View style={styles.selectedRelayerContainer}>
-              <Text style={styles.detailText}>
-                Selected relayer: {bleRelay.selectedRelayer.name}
-              </Text>
-              <Text style={styles.detailText}>
-                RSSI: {typeof bleRelay.selectedRelayer.rssi === "number" ? `${bleRelay.selectedRelayer.rssi} dBm` : "n/a"}
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.detailText}>Selected relayer: none</Text>
-          )}
           {bleRelay.error && <Text style={styles.errorText}>Error: {bleRelay.error}</Text>}
           <View style={styles.bleActions}>
             <CustomButton
-              title="Start Scan"
-              onPress={bleRelay.startScanning}
-              disabled={!bleRelay.isInitialized || bleRelay.isScanning}
+              title={bleRelay.isScanning ? "Stop Scan" : "Start Scan"}
+              onPress={bleRelay.isScanning ? bleRelay.stopScanning : bleRelay.startScanning}
+              disabled={bleRelay.bluetoothState !== 'PoweredOn'}
               style={styles.bleActionButton}
             />
             <CustomButton
-              title="Stop Scan"
-              onPress={bleRelay.stopScanning}
-              disabled={!bleRelay.isScanning}
+              title="View Details"
+              onPress={() => navigation.navigate('BleDebug')}
               variant="outline"
               style={styles.bleActionButton}
             />
           </View>
-          {bleRelay.handshakeContexts.length > 0 && (
-            <View style={styles.handshakeContainer}>
-              <Text style={styles.detailText}>Active handshakes:</Text>
-              {bleRelay.handshakeContexts.map((ctx) => (
-                <Text key={ctx.contextId} style={styles.detailText}>
-                  · {ctx.peerId.slice(0, 8)}… (started {new Date(ctx.startedAt).toLocaleTimeString()})
-                </Text>
-              ))}
-            </View>
-          )}
-          {bleRelay.sessions.length > 0 && (
-            <View style={styles.handshakeContainer}>
-              <Text style={styles.detailText}>Active sessions:</Text>
-              {bleRelay.sessions.map((session) => (
-                <Text key={session.sessionId} style={styles.detailText}>
-                  · {session.peerId.slice(0, 8)}… ({session.role})
-                </Text>
-              ))}
-            </View>
-          )}
         </CustomCard>
       )}
 

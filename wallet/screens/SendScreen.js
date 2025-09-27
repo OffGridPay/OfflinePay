@@ -7,7 +7,7 @@ import CustomButton from "../components/CustomButton"
 import CustomCard from "../components/CustomCard"
 import CustomInput from "../components/CustomInput"
 import { theme } from "../theme"
-import useBleRelay from "../hooks/useBleRelay"
+import useSimpleBle from "../hooks/useSimpleBle"
 
 export default function SendScreen({ navigation }) {
   const [recipient, setRecipient] = useState("")
@@ -19,7 +19,7 @@ export default function SendScreen({ navigation }) {
   const [bleProgress, setBleProgress] = useState('')
   
   // BLE integration
-  const bleRelay = useBleRelay({ logger: console })
+  const bleRelay = useSimpleBle({ logger: console })
 
   // Auto-detect best send method based on available relayers
   useEffect(() => {
