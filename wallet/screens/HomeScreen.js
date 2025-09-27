@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchWallet, fetchAcks } from '../utils/db';
 import { ethers } from 'ethers';
 import { useConnectivity } from '../context/ConnectivityContext';
+import useBleRelay from '../hooks/useBleRelay';
 
 function getConnectivityBadgeStyle(connectivity) {
   const base = {
@@ -25,12 +26,22 @@ function getConnectivityBadgeStyle(connectivity) {
   return { ...base, backgroundColor: '#f97316' };
 }
 
+function getBleStatusBadgeStyle(canRelay) {
+  return {
+    backgroundColor: canRelay ? '#059669' : '#64748b',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  };
+}
+
 export default function HomeScreen({ navigation }) {
   const [wallet, setWallet] = useState(null);
   const [balance, setBalance] = useState('0.0');
   const [acks, setAcks] = useState([]);
   const [loading, setLoading] = useState(true);
   const connectivity = useConnectivity();
+  const bleRelay = useBleRelay({ autoStart: true });
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -120,6 +131,39 @@ export default function HomeScreen({ navigation }) {
         )}
       </TouchableOpacity>
 
+      {bleRelay.isSupported && (
+        <View style={styles.bleRelayCard}>
+          <Text style={styles.bleRelayTitle}>BLE Mesh Network</Text>
+          <View style={styles.bleStatusRow}>
+            <Text style={styles.bleStatusLabel}>Status:</Text>
+            <View style={getBleStatusBadgeStyle(bleRelay.relayerRole.canRelay)}>
+              <Text style={styles.bleStatusText}>
+                {bleRelay.relayerRole.canRelay ? 'Active Relayer' : 
+                 bleRelay.relayerRole.isOnline ? 'Online' : 'Offline'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.bleSubtext}>
+            Nearby peers: {bleRelay.peers.length} | Relayers: {bleRelay.relayerPeers.length}
+          </Text>
+          {bleRelay.error && (
+            <Text style={styles.bleErrorText}>Error: {bleRelay.error}</Text>
+          )}
+          <View style={styles.bleActions}>
+            <Button 
+              title="Start Scan" 
+              onPress={bleRelay.startScanning} 
+              disabled={!bleRelay.isInitialized}
+            />
+            <Button 
+              title="Stop Scan" 
+              onPress={bleRelay.stopScanning}
+              disabled={!bleRelay.isInitialized}
+            />
+          </View>
+        </View>
+      )}
+
       <Text style={styles.historyTitle}>Transaction History</Text>
       {acks.length === 0 ? (
         <Text style={styles.noTxText}>No transactions yet.</Text>
@@ -160,6 +204,49 @@ const styles = StyleSheet.create({
     color: '#cbd5f5',
     fontSize: 12,
     marginTop: 2,
+  },
+  bleRelayCard: {
+    backgroundColor: '#0f172a',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 10,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  bleRelayTitle: {
+    color: '#f8fafc',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  bleStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  bleStatusLabel: {
+    color: '#cbd5f5',
+    marginRight: 8,
+  },
+  bleStatusText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  bleSubtext: {
+    color: '#94a3b8',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  bleErrorText: {
+    color: '#f87171',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  bleActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
   },
   historyTitle: { fontSize: 22, fontWeight: 'bold', marginLeft: 10, marginBottom: 10 },
   txList: { flex: 1 },
