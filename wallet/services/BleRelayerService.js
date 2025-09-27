@@ -6,6 +6,7 @@
 import { Platform, PermissionsAndroid } from 'react-native';
 import { Buffer } from 'buffer';
 import { ethers } from 'ethers';
+import { createEnhancedLogger } from '../utils/BleLogger';
 
 import {
   createHandshakeInit,
@@ -53,7 +54,7 @@ const HANDSHAKE_TIMEOUT_MS = 20000;
 
 export class BleRelayerService {
   constructor(options = {}) {
-    this.logger = options.logger || console;
+    this.logger = options.logger || createEnhancedLogger('BLE-RELAY');
     this.walletAddress = options.walletAddress || null;
     this.walletPrivateKey = options.walletPrivateKey || null;
     this.peerStaleMs = options.peerStaleMs || DEFAULT_PEER_STALE_MS;
@@ -142,43 +143,113 @@ export class BleRelayerService {
   }
 
   async requestBlePermissions() {
+    this.logger.info('Starting BLE permission request', {
+      platform: Platform.OS,
+      version: Platform.Version,
+      isAndroid12Plus: Platform.OS === 'android' && Platform.Version >= 31,
+    });
+
     try {
-      // For Android 12+ (API 31+)
-      if (Platform.Version >= 31) {
-        const permissions = [
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        ];
-
-        const results = await PermissionsAndroid.requestMultiple(permissions);
-        
-        const allGranted = permissions.every(permission => 
-          results[permission] === PermissionsAndroid.RESULTS.GRANTED
-        );
-
-        this.logger.info('[ble-relay] permission results:', results);
-        return allGranted;
-      } else {
-        // For older Android versions
-        const locationResult = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: 'Location Permission',
-            message: 'This app needs location permission to scan for nearby devices via Bluetooth.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          }
-        );
-
-        return locationResult === PermissionsAndroid.RESULTS.GRANTED;
+      if (Platform.OS !== 'android') {
+        this.logger.info('iOS platform detected, no explicit permissions needed');
+        return true;
       }
+
+      const isAndroid12Plus = Platform.Version >= 31;
+      const requiredPermissions = isAndroid12Plus
+        ? [
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+          ]
+        : [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION];
+
+      const results = {};
+      const deniedPermissions = [];
+
+      // Request each permission sequentially to guarantee system prompt
+      for (const permission of requiredPermissions) {
+        const friendlyName = this._getPermissionFriendlyName(permission);
+        const alreadyGranted = await PermissionsAndroid.check(permission);
+
+        this.logger.info('Checking permission status', {
+          permission,
+          friendlyName,
+          alreadyGranted,
+        });
+
+        if (alreadyGranted) {
+          results[permission] = PermissionsAndroid.RESULTS.GRANTED;
+          continue;
+        }
+
+        const rationale = this._getPermissionRationale(permission, friendlyName);
+        const result = await PermissionsAndroid.request(permission, rationale);
+        results[permission] = result;
+
+        this.logger.info('Permission request result', {
+          permission,
+          friendlyName,
+          result,
+        });
+
+        if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+          deniedPermissions.push({ permission, result, friendlyName });
+        }
+      }
+
+      this.logger.logPermissionRequest(requiredPermissions, results);
+
+      if (deniedPermissions.length) {
+        this.logger.error('Some BLE permissions were denied', { deniedPermissions });
+        return false;
+      }
+
+      this.logger.info('All BLE permissions granted');
+      return true;
     } catch (error) {
-      this.logger.error('[ble-relay] permission request failed:', error);
+      this.logger.error('BLE permission request failed', {
+        error: error.message,
+        stack: error.stack,
+        platform: Platform.OS,
+        version: Platform.Version,
+      });
       return false;
     }
+  }
+
+  _getPermissionFriendlyName(permission) {
+    const mapping = {
+      [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION]: 'Location',
+      [PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION]: 'Coarse Location',
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN]: 'Bluetooth Scan',
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT]: 'Bluetooth Connect',
+      [PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE]: 'Bluetooth Advertise',
+    };
+
+    return mapping[permission] || permission;
+  }
+
+  _getPermissionRationale(permission, friendlyName) {
+    if (permission === PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION) {
+      return {
+        title: 'Location Permission Required',
+        message:
+          'OfflinePay needs location permission to scan for nearby Bluetooth devices and enable offline payments.',
+        buttonNeutral: 'Ask Me Later',
+        buttonNegative: 'Cancel',
+        buttonPositive: 'Allow',
+      };
+    }
+
+    return {
+      title: `${friendlyName} Permission Required`,
+      message: `OfflinePay needs ${friendlyName.toLowerCase()} permission to establish secure Bluetooth connections with nearby relayers.`,
+      buttonNeutral: 'Ask Me Later',
+      buttonNegative: 'Cancel',
+      buttonPositive: 'Allow',
+    };
   }
 
   async updateRole(isOnline = false, canRelay = false) {
