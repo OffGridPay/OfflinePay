@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -36,10 +36,7 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-sqlite",
-      "expo-secure-store"
-    ],
+    "plugins": ["expo-sqlite", "expo-secure-store", "react-native-ble-plx"],
     "extra": {
       "eas": {
         "projectId": "60789dd8-01d9-4d8f-8078-6474161fcc05"
