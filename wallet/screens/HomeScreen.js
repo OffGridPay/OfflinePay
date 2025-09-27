@@ -1,11 +1,14 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, Button, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, Button, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchWallet, fetchAcks, fetchLatestBalanceSnapshot, upsertBalanceSnapshot, purgeOldBalanceSnapshots } from '../utils/db';
 import { ethers } from 'ethers';
 import { useConnectivity } from '../context/ConnectivityContext';
 import useBleRelay from '../hooks/useBleRelay';
 import { RELAYER_BASE_URL } from '../config/env';
+import CustomCard from '../components/CustomCard';
+import CustomButton from '../components/CustomButton';
+import { theme } from '../theme';
 
 function getConnectivityBadgeStyle(connectivity) {
   const base = {
@@ -213,28 +216,28 @@ export default function HomeScreen({ navigation }) {
   }, [connectivity.isConnected, connectivity.isInternetReachable, fetchBalanceFromBackend, tryLoadCachedSnapshot]);
 
   const loadData = useCallback(async () => {
-    setLoading(true);
+    setLoading(true)
     try {
-      const fetchedWallet = await fetchWallet();
+      const fetchedWallet = await fetchWallet()
       if (fetchedWallet) {
-        setWallet(fetchedWallet);
-        const fetchedAcks = await fetchAcks();
-        setAcks(fetchedAcks);
+        setWallet(fetchedWallet)
+        const fetchedAcks = await fetchAcks()
+        setAcks(fetchedAcks)
 
         await refreshBalance(fetchedWallet.address, fetchedAcks);
       }
     } catch (error) {
-      console.error('Failed to load data:', error);
+      console.error("Failed to load data:", error)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
   }, [refreshBalance]);
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
+      loadData()
     }, [loadData])
-  );
+  )
 
   useEffect(() => {
     if (!wallet?.address) return;
@@ -247,25 +250,46 @@ export default function HomeScreen({ navigation }) {
   }, [connectivity.isConnected, connectivity.isInternetReachable, wallet?.address, acks, refreshBalance]);
 
   const renderTxItem = ({ item }) => {
-    const isSender = item.fromAddress.toLowerCase() === wallet.address.toLowerCase();
-    const value = ethers.utils.formatEther(item.value);
+    const isSender = item.fromAddress.toLowerCase() === wallet.address.toLowerCase()
+    const value = ethers.utils.formatEther(item.value)
     return (
       <View style={styles.txItem}>
-        <Text style={styles.txHash} selectable>Tx: {item.txHash.substring(0, 10)}...</Text>
-        <Text>{isSender ? `To: ${item.toAddress.substring(0, 10)}...` : `From: ${item.fromAddress.substring(0, 10)}...`}</Text>
-        <Text style={[styles.txAmount, { color: isSender ? 'red' : 'green' }]}>
-          {isSender ? '-' : '+'}{value} ETH
-        </Text>
+        <View style={styles.txHeader}>
+          <Text style={styles.txHash} numberOfLines={1} ellipsizeMode="middle">
+            {item.txHash}
+          </Text>
+          <Text
+            style={[
+              styles.txAmount,
+              { color: isSender ? theme.colors.error : theme.colors.success },
+            ]}
+          >
+            {isSender ? "-" : "+"}
+            {value} ETH
+          </Text>
+        </View>
+        <View style={styles.txDetails}>
+          <Text style={styles.txDetailText}>
+            {isSender
+              ? `To: ${item.toAddress.substring(0, 10)}...`
+              : `From: ${item.fromAddress.substring(0, 10)}...`}
+          </Text>
+          <Text style={styles.txDetailText}>Block: {item.blockNumber}</Text>
+        </View>
       </View>
-    );
-  };
+    )
+  }
 
   if (loading) {
-    return <View style={styles.centered}><ActivityIndicator size="large" /></View>;
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+      </View>
+    )
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.addressLabel}>Your Address:</Text>
         <Text style={styles.address} selectable>{wallet ? wallet.address : 'Loading...'}</Text>
@@ -301,62 +325,89 @@ export default function HomeScreen({ navigation }) {
           Last update: {connectivity.lastChangedAt ? new Date(connectivity.lastChangedAt).toLocaleTimeString() : '—'}
         </Text>
         {connectivity.heartbeat.url ? (
-          <Text style={styles.connectivitySubtext}>
-            Relayer check: {connectivity.heartbeat.status} {connectivity.heartbeat.latencyMs ? `(${connectivity.heartbeat.latencyMs}ms)` : ''}
+          <Text style={styles.detailText}>
+            Relayer check: {connectivity.heartbeat.status}{" "}
+            {connectivity.heartbeat.latencyMs ? `(${connectivity.heartbeat.latencyMs}ms)` : ""}
           </Text>
         ) : (
-          <Text style={styles.connectivitySubtext}>
-            Heartbeat not configured
-          </Text>
+          <Text style={styles.detailText}>Heartbeat not configured</Text>
         )}
       </TouchableOpacity>
 
+      {/* BLE Relay Card */}
       {bleRelay.isSupported && (
-        <View style={styles.bleRelayCard}>
-          <Text style={styles.bleRelayTitle}>BLE Mesh Network</Text>
+        <CustomCard
+          variant={
+            bleRelay.relayerRole.canRelay
+              ? "success"
+              : bleRelay.relayerRole.isOnline
+              ? "info"
+              : "error"
+          }
+        >
+          <Text style={styles.cardTitle}>BLE Mesh Network</Text>
           <View style={styles.bleStatusRow}>
             <Text style={styles.bleStatusLabel}>Status:</Text>
-            <View style={getBleStatusBadgeStyle(bleRelay.relayerRole.canRelay)}>
+            <View
+              style={[
+                styles.bleStatusBadge,
+                {
+                  backgroundColor: bleRelay.relayerRole.canRelay
+                    ? theme.colors.bleActive
+                    : bleRelay.relayerRole.isOnline
+                    ? theme.colors.bleOnline
+                    : theme.colors.bleOffline,
+                },
+              ]}
+            >
               <Text style={styles.bleStatusText}>
-                {bleRelay.relayerRole.canRelay ? 'Active Relayer' : 
-                 bleRelay.relayerRole.isOnline ? 'Online' : 'Offline'}
+                {bleRelay.relayerRole.canRelay
+                  ? "Active Relayer"
+                  : bleRelay.relayerRole.isOnline
+                  ? "Online"
+                  : "Offline"}
               </Text>
             </View>
           </View>
-          <Text style={styles.bleSubtext}>
+          <Text style={styles.detailText}>
             Nearby peers: {bleRelay.peers.length} | Relayers: {bleRelay.relayerPeers.length}
           </Text>
-          {bleRelay.error && (
-            <Text style={styles.bleErrorText}>Error: {bleRelay.error}</Text>
-          )}
+          {bleRelay.error && <Text style={styles.errorText}>Error: {bleRelay.error}</Text>}
           <View style={styles.bleActions}>
-            <Button 
-              title="Start Scan" 
-              onPress={bleRelay.startScanning} 
+            <CustomButton
+              title="Start Scan"
+              onPress={bleRelay.startScanning}
               disabled={!bleRelay.isInitialized}
+              style={styles.bleActionButton}
             />
-            <Button 
-              title="Stop Scan" 
+            <CustomButton
+              title="Stop Scan"
               onPress={bleRelay.stopScanning}
               disabled={!bleRelay.isInitialized}
+              variant="outline"
+              style={styles.bleActionButton}
             />
           </View>
-        </View>
+        </CustomCard>
       )}
 
+      {/* Transaction History */}
       <Text style={styles.historyTitle}>Transaction History</Text>
       {acks.length === 0 ? (
-        <Text style={styles.noTxText}>No transactions yet.</Text>
+        <CustomCard>
+          <Text style={styles.noTxText}>No transactions yet.</Text>
+        </CustomCard>
       ) : (
-        <FlatList
-          data={acks}
-          renderItem={renderTxItem}
-          keyExtractor={item => item.id.toString()}
-          style={styles.txList}
-        />
+        <View style={styles.txList}>
+          {acks.map((item, index) => (
+            <CustomCard key={item.id} style={index === 0 ? styles.latestTxCard : {}}>
+              {renderTxItem({ item })}
+            </CustomCard>
+          ))}
+        </View>
       )}
-    </View>
-  );
+    </ScrollView>
+  )
 }
 
 const styles = StyleSheet.create({
@@ -402,37 +453,94 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   bleStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: theme.spacing.md,
   },
   bleStatusLabel: {
-    color: '#cbd5f5',
-    marginRight: 8,
+    color: theme.colors.text,
+    marginRight: theme.spacing.sm,
+    fontSize: theme.typography.body.fontSize,
+  },
+  bleStatusBadge: {
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.full,
   },
   bleStatusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  bleSubtext: {
-    color: '#94a3b8',
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  bleErrorText: {
-    color: '#f87171',
-    fontSize: 12,
-    marginBottom: 8,
+    color: "#fff",
+    fontSize: theme.typography.small.fontSize,
+    fontWeight: "500",
   },
   bleActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: theme.spacing.md,
   },
-  historyTitle: { fontSize: 22, fontWeight: 'bold', marginLeft: 10, marginBottom: 10 },
-  txList: { flex: 1 },
-  txItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  txHash: { flex: 1, fontFamily: 'monospace' },
-  txAmount: { fontWeight: 'bold' },
-  noTxText: { textAlign: 'center', marginTop: 20, color: '#888' },
-});
+  bleActionButton: {
+    flex: 0.48,
+  },
+  historyTitle: {
+    fontSize: theme.typography.h2.fontSize,
+    fontWeight: theme.typography.h2.fontWeight,
+    color: theme.colors.text,
+    marginVertical: theme.spacing.lg,
+    marginHorizontal: theme.spacing.sm,
+  },
+  txList: {
+    marginBottom: theme.spacing.xl,
+  },
+  latestTxCard: {
+    borderWidth: 2,
+    borderColor: theme.colors.primary,
+  },
+  txItem: {
+    padding: theme.spacing.sm,
+  },
+  txHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: theme.spacing.xs,
+  },
+  txHash: {
+    fontSize: theme.typography.caption.fontSize,
+    fontFamily: "monospace",
+    color: theme.colors.text,
+    flex: 1,
+    marginRight: theme.spacing.sm,
+  },
+  txAmount: {
+    fontWeight: "bold",
+    fontSize: theme.typography.body.fontSize,
+  },
+  txDetails: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  txDetailText: {
+    fontSize: theme.typography.small.fontSize,
+    color: theme.colors.textSecondary,
+  },
+  noTxText: {
+    textAlign: "center",
+    color: theme.colors.textSecondary,
+    padding: theme.spacing.xl,
+  },
+  errorText: {
+    color: theme.colors.error,
+    fontSize: theme.typography.small.fontSize,
+    marginBottom: theme.spacing.sm,
+  },
+  detailText: {
+    color: theme.colors.textSecondary,
+    fontSize: theme.typography.small.fontSize,
+    marginTop: theme.spacing.xs,
+  },
+  cardTitle: {
+    fontSize: theme.typography.h3.fontSize,
+    fontWeight: theme.typography.h3.fontWeight,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.md,
+  },
+})

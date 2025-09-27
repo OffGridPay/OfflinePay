@@ -1,55 +1,60 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, Button } from 'react-native';
-import useBleStackDemo from '../hooks/useBleStackDemo';
-
+import React, { useMemo } from "react"
+import { View, Text, StyleSheet, FlatList, ScrollView } from "react-native"
+import useBleStackDemo from "../hooks/useBleStackDemo"
+import CustomButton from "../components/CustomButton"
+import CustomCard from "../components/CustomCard"
+import { theme } from "../theme"
 
 function renderDevice({ item }) {
   return (
-    <View style={styles.deviceCard}>
-      <Text style={styles.deviceName} selectable>{item.name} ({item.id})</Text>
-      <Text style={styles.deviceDetail}>RSSI: {item.rssi ?? 'n/a'}</Text>
-      <Text style={styles.deviceDetail}>MTU: {item.mtu ?? 'n/a'}</Text>
-      <Text style={styles.deviceDetail}>Service UUIDs: {item.serviceUUIDs?.join(', ') || '—'}</Text>
+    <CustomCard style={styles.deviceCard}>
+      <Text style={styles.deviceName} selectable>
+        {item.name} ({item.id})
+      </Text>
+      <Text style={styles.deviceDetail}>RSSI: {item.rssi ?? "n/a"}</Text>
+      <Text style={styles.deviceDetail}>MTU: {item.mtu ?? "n/a"}</Text>
+      <Text style={styles.deviceDetail}>Service UUIDs: {item.serviceUUIDs?.join(", ") || "—"}</Text>
       {item.manufacturerData ? (
         <Text style={styles.deviceDetail}>Manufacturer: {item.manufacturerData}</Text>
       ) : null}
-    </View>
-  );
+    </CustomCard>
+  )
 }
 
 function Header({ status, adapterState, error, onReset, supportInfo }) {
   const statusText = useMemo(() => {
     switch (status) {
-      case 'scanning':
-        return 'Scanning for nearby devices…';
-      case 'unsupported':
-        return 'BLE not supported in current build/runtime';
+      case "scanning":
+        return "Scanning for nearby devices…"
+      case "unsupported":
+        return "BLE not supported in current build/runtime"
       default:
-        return 'Idle';
+        return "Idle"
     }
-  }, [status]);
+  }, [status])
 
   return (
-    <View style={styles.header}>
-      <Text style={styles.headerTitle}>BLE Demo</Text>
+    <CustomCard style={styles.header}>
+      <Text style={styles.headerTitle}>BLE Debug</Text>
       <Text style={styles.headerSubtitle}>Status: {statusText}</Text>
       <Text style={styles.headerSubtitle}>Adapter State: {adapterState}</Text>
       {!supportInfo.supported ? (
         <Text style={styles.warningText}>
-          {supportInfo.message || 'BLE scanning requires a development build (Expo Go not supported).'}
+          {supportInfo.message ||
+            "BLE scanning requires a development build (Expo Go not supported)."}
         </Text>
       ) : null}
       {error ? <Text style={styles.errorText}>Error: {error}</Text> : null}
-      <Button title="Reset" onPress={onReset} />
-    </View>
-  );
+      <CustomButton title="Reset" onPress={onReset} variant="outline" style={styles.resetButton} />
+    </CustomCard>
+  )
 }
 
 export default function BleDebugScreen() {
-  const ble = useBleStackDemo({ autoStart: false });
+  const ble = useBleStackDemo({ autoStart: false })
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <Header
         status={ble.status}
         adapterState={ble.adapterState}
@@ -58,78 +63,106 @@ export default function BleDebugScreen() {
         supportInfo={ble.supportInfo}
       />
       <View style={styles.actionsRow}>
-        <Button title="Start Scan" onPress={ble.startScan} disabled={!ble.isSupported || ble.status === 'scanning'} />
-        <Button title="Stop Scan" onPress={ble.stopScan} disabled={ble.status !== 'scanning'} />
+        <CustomButton
+          title="Start Scan"
+          onPress={ble.startScan}
+          disabled={!ble.isSupported || ble.status === "scanning"}
+          style={styles.actionButton}
+        />
+        <CustomButton
+          title="Stop Scan"
+          onPress={ble.stopScan}
+          disabled={ble.status !== "scanning"}
+          variant="outline"
+          style={styles.actionButton}
+        />
       </View>
-      <FlatList
-        data={ble.devices}
-        keyExtractor={(item) => item.id}
-        renderItem={renderDevice}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={<Text style={styles.emptyText}>No devices discovered yet.</Text>}
-      />
-    </View>
-  );
+      <Text style={styles.sectionTitle}>Discovered Devices</Text>
+      {ble.devices.length === 0 ? (
+        <CustomCard>
+          <Text style={styles.emptyText}>No devices discovered yet.</Text>
+        </CustomCard>
+      ) : (
+        <View style={styles.devicesContainer}>
+          {ble.devices.map((device, index) => (
+            <View key={device.id}>{renderDevice({ item: device })}</View>
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  )
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: theme.colors.background,
+  },
+  contentContainer: {
+    padding: theme.spacing.md,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#1e293b',
+    marginBottom: theme.spacing.lg,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#f8fafc',
-    marginBottom: 4,
+    fontSize: theme.typography.h2.fontSize,
+    fontWeight: theme.typography.h2.fontWeight,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.md,
   },
   headerSubtitle: {
-    color: '#cbd5f5',
-    marginBottom: 4,
+    fontSize: theme.typography.body.fontSize,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
   },
   warningText: {
-    color: '#facc15',
-    marginBottom: 8,
+    color: theme.colors.warning,
+    fontSize: theme.typography.caption.fontSize,
+    marginTop: theme.spacing.sm,
   },
   errorText: {
-    color: '#f87171',
-    marginBottom: 8,
+    color: theme.colors.error,
+    fontSize: theme.typography.caption.fontSize,
+    marginTop: theme.spacing.sm,
+  },
+  resetButton: {
+    marginTop: theme.spacing.lg,
+    alignSelf: "flex-start",
   },
   actionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 12,
-    backgroundColor: '#0f172a',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: theme.spacing.lg,
   },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 40,
+  actionButton: {
+    flex: 0.48,
+  },
+  sectionTitle: {
+    fontSize: theme.typography.h3.fontSize,
+    fontWeight: theme.typography.h3.fontWeight,
+    color: theme.colors.text,
+    marginBottom: theme.spacing.lg,
+  },
+  devicesContainer: {
+    marginBottom: theme.spacing.xl,
   },
   deviceCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    marginBottom: theme.spacing.sm,
   },
   deviceName: {
-    color: '#f8fafc',
-    fontWeight: '600',
-    marginBottom: 8,
+    fontSize: theme.typography.body.fontSize,
+    fontWeight: "600",
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
   },
   deviceDetail: {
-    color: '#cbd5f5',
-    fontSize: 12,
-    marginBottom: 4,
+    fontSize: theme.typography.caption.fontSize,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
   },
   emptyText: {
-    color: '#94a3b8',
-    textAlign: 'center',
-    marginTop: 40,
+    textAlign: "center",
+    color: theme.colors.textSecondary,
+    padding: theme.spacing.xl,
   },
-});
-
+})
