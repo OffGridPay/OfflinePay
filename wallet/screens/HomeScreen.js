@@ -37,7 +37,7 @@ function getBleStatusBadgeStyle(canRelay) {
 
 export default function HomeScreen({ navigation }) {
   const [wallet, setWallet] = useState(null);
-  const [balance, setBalance] = useState('0.0');
+  const [balance, setBalance] = useState('0.000');
   const [acks, setAcks] = useState([]);
   const [loading, setLoading] = useState(true);
   const connectivity = useConnectivity();
