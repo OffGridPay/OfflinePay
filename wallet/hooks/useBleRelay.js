@@ -28,16 +28,24 @@ export default function useBleRelay(options = {}) {
 
   // Initialize the service
   const initializeService = useCallback(async () => {
-    if (serviceRef.current || !wallet) return;
+    logger.info('[ble-relay-hook] initializeService called', { 
+      hasExistingService: !!serviceRef.current, 
+      walletAddress: wallet?.address?.slice(0, 10) 
+    });
+
+    if (serviceRef.current) return;
 
     try {
+      logger.info('[ble-relay-hook] creating BleRelayerService...');
       const service = new BleRelayerService({
-        walletAddress: wallet.address,
-        walletPrivateKey: wallet.privateKey,
+        walletAddress: wallet?.address || null,
+        walletPrivateKey: wallet?.privateKey || null,
         logger,
       });
 
+      logger.info('[ble-relay-hook] calling service.initialize()...');
       await service.initialize();
+      logger.info('[ble-relay-hook] service.initialize() completed');
       
       // Subscribe to peer discovery events
       const handlePeerDiscovered = (peerInfo) => {
@@ -101,8 +109,10 @@ export default function useBleRelay(options = {}) {
       serviceRef.current = service;
       setIsInitialized(true);
       setError(null);
+      logger.info('[ble-relay-hook] service initialization complete, isInitialized=true');
     } catch (initError) {
       logger.error('[ble-relay-hook] initialization failed:', initError);
+      logger.error('[ble-relay-hook] initialization error stack:', initError.stack);
       setError(initError.message);
       setIsSupported(false);
     }
@@ -223,8 +233,10 @@ export default function useBleRelay(options = {}) {
 
   // Load wallet on hook mount
   useEffect(() => {
+    logger.info('[ble-relay-hook] Loading wallet...');
     fetchWallet()
       .then(walletData => {
+        logger.info('[ble-relay-hook] Wallet loaded:', { hasWallet: !!walletData, address: walletData?.address?.slice(0, 10) });
         if (walletData) {
           setWallet(walletData);
         }
@@ -236,19 +248,20 @@ export default function useBleRelay(options = {}) {
 
   // Initialize service when wallet is loaded
   useEffect(() => {
+    logger.info('[ble-relay-hook] Wallet effect triggered', { hasWallet: !!wallet });
     if (!wallet) {
       return;
     }
 
-    if (serviceRef.current) {
-      serviceRef.current.updateWalletCredentials?.({
+    initializeService();
+
+    const service = serviceRef.current;
+    if (service?.updateWalletCredentials) {
+      service.updateWalletCredentials({
         walletAddress: wallet.address,
         walletPrivateKey: wallet.privateKey,
       });
-      return;
     }
-
-    initializeService();
   }, [wallet, initializeService]);
 
   // Update role when connectivity changes

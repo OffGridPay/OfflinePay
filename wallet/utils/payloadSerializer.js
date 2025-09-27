@@ -17,6 +17,8 @@ export const PAYLOAD_TYPES = {
   RECEIPT_ACK: 0x02,
   BROADCAST_ACK: 0x03,
   HANDSHAKE: 0x04,
+  BALANCE_REQUEST: 0x05,
+  BALANCE_RESPONSE: 0x06,
 };
 
 // Chunk flags
@@ -70,6 +72,46 @@ export function createAckPayload(type, txHash, result, relayerSignature = null) 
     },
     relayerSignature,
   };
+}
+
+/**
+ * Create balance request payload (T2.7 - FR-30)
+ */
+export function createBalanceRequestPayload(walletAddress, requestId = null) {
+  return {
+    type: PAYLOAD_TYPES.BALANCE_REQUEST,
+    timestamp: Date.now(),
+    requestId: requestId || generateRequestId(),
+    walletAddress,
+    requestedData: ['native', 'protocol'], // Types of balance data requested
+  };
+}
+
+/**
+ * Create balance response payload (T2.7 - FR-31)
+ */
+export function createBalanceResponsePayload(request, balanceData, relayerSignature = null) {
+  return {
+    type: PAYLOAD_TYPES.BALANCE_RESPONSE,
+    timestamp: Date.now(),
+    requestId: request.requestId,
+    walletAddress: request.walletAddress,
+    balances: {
+      native: balanceData.nativeBalance || '0',
+      protocol: balanceData.protocolBalance || null,
+      nonce: balanceData.nonce || 0,
+    },
+    dataSource: 'relayer-ble',
+    signature: relayerSignature,
+    validUntil: Date.now() + (2 * 60 * 1000), // Valid for 2 minutes (FR-33)
+  };
+}
+
+/**
+ * Generate unique request ID
+ */
+function generateRequestId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
 /**
@@ -287,6 +329,8 @@ export function generateSessionId() {
 export default {
   createTransactionPayload,
   createAckPayload,
+  createBalanceRequestPayload,
+  createBalanceResponsePayload,
   serializePayload,
   deserializePayload,
   chunkPayload,

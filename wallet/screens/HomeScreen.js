@@ -146,6 +146,17 @@ export default function HomeScreen({ navigation }) {
   const connectivity = useConnectivity();
   const bleRelay = useBleRelay({ autoStart: true });
 
+  // Debug logging for BLE relay state
+  useEffect(() => {
+    console.log('[HomeScreen] BLE relay state:', {
+      isSupported: bleRelay.isSupported,
+      isInitialized: bleRelay.isInitialized,
+      error: bleRelay.error,
+      peers: bleRelay.peers.length,
+      relayerRole: bleRelay.relayerRole,
+    });
+  }, [bleRelay.isSupported, bleRelay.isInitialized, bleRelay.error, bleRelay.peers.length, bleRelay.relayerRole]);
+
   const applySnapshotToState = useCallback((snapshot, sourceOverride) => {
     const parsed = extractBalanceFromSnapshot(snapshot);
     setBalance(parsed.amount);
