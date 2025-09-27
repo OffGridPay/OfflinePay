@@ -372,18 +372,30 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.detailText}>
             Nearby peers: {bleRelay.peers.length} | Relayers: {bleRelay.relayerPeers.length}
           </Text>
+          {bleRelay.selectedRelayer ? (
+            <View style={styles.selectedRelayerContainer}>
+              <Text style={styles.detailText}>
+                Selected relayer: {bleRelay.selectedRelayer.name}
+              </Text>
+              <Text style={styles.detailText}>
+                RSSI: {typeof bleRelay.selectedRelayer.rssi === "number" ? `${bleRelay.selectedRelayer.rssi} dBm` : "n/a"}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.detailText}>Selected relayer: none</Text>
+          )}
           {bleRelay.error && <Text style={styles.errorText}>Error: {bleRelay.error}</Text>}
           <View style={styles.bleActions}>
             <CustomButton
               title="Start Scan"
               onPress={bleRelay.startScanning}
-              disabled={!bleRelay.isInitialized}
+              disabled={!bleRelay.isInitialized || bleRelay.isScanning}
               style={styles.bleActionButton}
             />
             <CustomButton
               title="Stop Scan"
               onPress={bleRelay.stopScanning}
-              disabled={!bleRelay.isInitialized}
+              disabled={!bleRelay.isScanning}
               variant="outline"
               style={styles.bleActionButton}
             />
@@ -471,6 +483,9 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: theme.typography.small.fontSize,
     fontWeight: "500",
+  },
+  selectedRelayerContainer: {
+    marginTop: theme.spacing.xs,
   },
   bleActions: {
     flexDirection: "row",

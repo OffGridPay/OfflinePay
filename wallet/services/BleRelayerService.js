@@ -4,6 +4,7 @@
  */
 
 import { Platform, PermissionsAndroid } from 'react-native';
+import { Buffer } from 'buffer';
 
 let BlePlx;
 try {
@@ -25,22 +26,29 @@ export const DEVICE_ROLES = {
   RELAY_CAPABLE: 0x04,
 };
 
+const DEFAULT_PEER_STALE_MS = 15000;
+const PEER_MAINTENANCE_INTERVAL_MS = 5000;
+
 export class BleRelayerService {
   constructor(options = {}) {
     this.logger = options.logger || console;
     this.walletAddress = options.walletAddress || null;
+    this.peerStaleMs = options.peerStaleMs || DEFAULT_PEER_STALE_MS;
     this.manager = null;
     this.isAdvertising = false;
     this.isScanning = false;
     this.deviceRole = DEVICE_ROLES.OFFLINE;
     this.nearbyPeers = new Map(); // deviceId -> peerInfo
     this.sessions = new Map(); // sessionId -> sessionInfo
+    this.peerMaintenanceTimer = null;
+    this.selectedRelayerId = null;
     
     this.subscribers = {
       peerDiscovered: [],
       peerLost: [],
       roleChanged: [],
       sessionEstablished: [],
+      relayerSelected: [],
     };
   }
 
@@ -207,6 +215,16 @@ export class BleRelayerService {
       
       this.isScanning = true;
       this.logger.info('[ble-relay] started scanning for peers');
+
+      if (!this.peerMaintenanceTimer) {
+        this.peerMaintenanceTimer = setInterval(() => {
+          try {
+            this._cleanupStalePeers();
+          } catch (maintenanceError) {
+            this.logger.error('[ble-relay] peer maintenance failed:', maintenanceError);
+          }
+        }, PEER_MAINTENANCE_INTERVAL_MS);
+      }
     } catch (error) {
       this.logger.error('[ble-relay] scanning failed:', error);
       throw error;
@@ -224,6 +242,11 @@ export class BleRelayerService {
       this.logger.info('[ble-relay] stopped scanning');
     } catch (error) {
       this.logger.error('[ble-relay] stop scanning failed:', error);
+    }
+
+    if (this.peerMaintenanceTimer) {
+      clearInterval(this.peerMaintenanceTimer);
+      this.peerMaintenanceTimer = null;
     }
   }
 
@@ -251,6 +274,11 @@ export class BleRelayerService {
       this.manager = null;
     }
     
+    if (this.peerMaintenanceTimer) {
+      clearInterval(this.peerMaintenanceTimer);
+      this.peerMaintenanceTimer = null;
+    }
+
     this.nearbyPeers.clear();
     this.sessions.clear();
     this.logger.info('[ble-relay] service destroyed');
@@ -272,13 +300,20 @@ export class BleRelayerService {
   }
 
   _handlePeerDiscovered(device) {
+    const now = Date.now();
+    const parsedManufacturer = this._parseManufacturerData(device.manufacturerData);
+    const rssi = typeof device.rssi === 'number' ? device.rssi : null;
+    const existing = this.nearbyPeers.get(device.id);
+
     const peerInfo = {
       id: device.id,
-      name: device.name || device.localName || 'Unknown',
-      rssi: device.rssi,
-      lastSeen: Date.now(),
+      name: device.name || device.localName || existing?.name || 'Unknown',
+      rssi,
+      firstSeen: existing?.firstSeen || now,
+      lastSeen: now,
       manufacturerData: device.manufacturerData,
-      role: this._parseDeviceRole(device),
+      role: parsedManufacturer.role,
+      truncatedAddress: parsedManufacturer.truncatedAddress,
     };
 
     this.nearbyPeers.set(device.id, peerInfo);
@@ -287,18 +322,105 @@ export class BleRelayerService {
     this.logger.info('[ble-relay] peer discovered:', {
       id: device.id.slice(0, 8),
       role: peerInfo.role,
-      rssi: device.rssi,
+      rssi,
     });
+
+    this._evaluateRelayerSelection();
   }
 
-  _parseDeviceRole(device) {
-    if (!device.manufacturerData) return DEVICE_ROLES.OFFLINE;
-    
+  _parseManufacturerData(manufacturerData) {
+    if (!manufacturerData) {
+      return {
+        role: DEVICE_ROLES.OFFLINE,
+        truncatedAddress: null,
+      };
+    }
+
     try {
-      const data = Buffer.from(device.manufacturerData, 'base64');
-      return data.length > 0 ? data[0] : DEVICE_ROLES.OFFLINE;
-    } catch {
-      return DEVICE_ROLES.OFFLINE;
+      const data = Buffer.from(manufacturerData, 'base64');
+      const role = data.length > 0 ? data[0] : DEVICE_ROLES.OFFLINE;
+      const truncatedAddress = data.length > 1 ? `0x${Buffer.from(data.slice(1)).toString('hex')}` : null;
+      return { role, truncatedAddress };
+    } catch (error) {
+      this.logger.warn('[ble-relay] failed to parse manufacturer data', error?.message);
+      return {
+        role: DEVICE_ROLES.OFFLINE,
+        truncatedAddress: null,
+      };
+    }
+  }
+
+  _cleanupStalePeers() {
+    const cutoff = Date.now() - this.peerStaleMs;
+    let removedSelectedRelayer = false;
+
+    for (const [id, peerInfo] of this.nearbyPeers.entries()) {
+      if (peerInfo.lastSeen < cutoff) {
+        this.nearbyPeers.delete(id);
+        this._notifySubscribers('peerLost', peerInfo);
+        this.logger.info('[ble-relay] peer lost:', {
+          id: peerInfo.id.slice(0, 8),
+          lastSeen: peerInfo.lastSeen,
+        });
+
+        if (this.selectedRelayerId === id) {
+          removedSelectedRelayer = true;
+        }
+      }
+    }
+
+    if (removedSelectedRelayer) {
+      this.selectedRelayerId = null;
+    }
+
+    this._evaluateRelayerSelection();
+  }
+
+  _evaluateRelayerSelection() {
+    const candidates = Array.from(this.nearbyPeers.values()).filter(
+      (peer) => (peer.role & DEVICE_ROLES.RELAY_CAPABLE) === DEVICE_ROLES.RELAY_CAPABLE
+    );
+
+    if (!candidates.length) {
+      if (this.selectedRelayerId) {
+        this.selectedRelayerId = null;
+        this._notifySubscribers('relayerSelected', null);
+      }
+      return;
+    }
+
+    const bestPeer = candidates.reduce((best, current) => {
+      if (!best) return current;
+
+      const bestRssi = typeof best.rssi === 'number' ? best.rssi : -Infinity;
+      const currentRssi = typeof current.rssi === 'number' ? current.rssi : -Infinity;
+
+      if (currentRssi > bestRssi) {
+        return current;
+      }
+
+      if (currentRssi === bestRssi) {
+        return current.lastSeen > best.lastSeen ? current : best;
+      }
+
+      return best;
+    }, null);
+
+    if (!bestPeer) {
+      if (this.selectedRelayerId) {
+        this.selectedRelayerId = null;
+        this._notifySubscribers('relayerSelected', null);
+      }
+      return;
+    }
+
+    if (this.selectedRelayerId !== bestPeer.id) {
+      this.selectedRelayerId = bestPeer.id;
+      this._notifySubscribers('relayerSelected', bestPeer);
+      this.logger.info('[ble-relay] relayer selected:', {
+        id: bestPeer.id.slice(0, 8),
+        rssi: bestPeer.rssi,
+      });
     }
   }
 

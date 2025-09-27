@@ -13,12 +13,15 @@ export default function useBleRelay(options = {}) {
   const connectivity = useConnectivity();
   
   const serviceRef = useRef(null);
+  const subscriptionsRef = useRef([]);
   const [wallet, setWallet] = useState(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isSupported, setIsSupported] = useState(true);
   const [error, setError] = useState(null);
   const [peers, setPeers] = useState([]);
+  const [selectedRelayer, setSelectedRelayer] = useState(null);
   const [relayerRole, setRelayerRole] = useState({ isOnline: false, canRelay: false });
+  const [isScanning, setIsScanning] = useState(false);
 
   // Initialize the service
   const initializeService = useCallback(async () => {
@@ -33,25 +36,44 @@ export default function useBleRelay(options = {}) {
       await service.initialize();
       
       // Subscribe to peer discovery events
-      service.subscribe('peerDiscovered', (peerInfo) => {
-        setPeers(prev => {
-          const exists = prev.find(p => p.id === peerInfo.id);
+      const handlePeerDiscovered = (peerInfo) => {
+        setPeers((prev) => {
+          const exists = prev.find((p) => p.id === peerInfo.id);
           if (exists) {
-            return prev.map(p => p.id === peerInfo.id ? peerInfo : p);
+            return prev.map((p) => (p.id === peerInfo.id ? peerInfo : p));
           }
           return [...prev, peerInfo];
         });
-      });
+      };
 
-      service.subscribe('roleChanged', ({ role, isOnline, canRelay }) => {
+      const handlePeerLost = (peerInfo) => {
+        setPeers((prev) => prev.filter((peer) => peer.id !== peerInfo.id));
+      };
+
+      const handleRelayerSelected = (peerInfo) => {
+        setSelectedRelayer(peerInfo);
+      };
+
+      const roleChangedHandler = ({ role, isOnline, canRelay }) => {
         setRelayerRole({ isOnline, canRelay });
         logger.info('[ble-relay-hook] role updated:', { isOnline, canRelay });
-      });
+      };
+
+      service.subscribe('peerDiscovered', handlePeerDiscovered);
+      service.subscribe('peerLost', handlePeerLost);
+      service.subscribe('relayerSelected', handleRelayerSelected);
+      service.subscribe('roleChanged', roleChangedHandler);
+
+      subscriptionsRef.current = [
+        { event: 'peerDiscovered', handler: handlePeerDiscovered },
+        { event: 'peerLost', handler: handlePeerLost },
+        { event: 'relayerSelected', handler: handleRelayerSelected },
+        { event: 'roleChanged', handler: roleChangedHandler },
+      ];
 
       serviceRef.current = service;
       setIsInitialized(true);
       setError(null);
-
     } catch (initError) {
       logger.error('[ble-relay-hook] initialization failed:', initError);
       setError(initError.message);
@@ -95,9 +117,11 @@ export default function useBleRelay(options = {}) {
     try {
       setError(null); // Clear any previous errors
       await service.startScanning();
+      setIsScanning(true);
     } catch (scanError) {
       logger.error('[ble-relay-hook] start scanning failed:', scanError);
       setError(`Scan failed: ${scanError.message}`);
+      setIsScanning(false);
     }
   }, [isInitialized, logger]);
 
@@ -107,6 +131,7 @@ export default function useBleRelay(options = {}) {
 
     try {
       await service.stopScanning();
+      setIsScanning(false);
     } catch (scanError) {
       logger.error('[ble-relay-hook] stop scanning failed:', scanError);
     }
@@ -144,6 +169,11 @@ export default function useBleRelay(options = {}) {
     return () => {
       const service = serviceRef.current;
       if (service) {
+        subscriptionsRef.current.forEach(({ event, handler }) => {
+          service.unsubscribe(event, handler);
+        });
+        subscriptionsRef.current = [];
+        setIsScanning(false);
         service.destroy();
         serviceRef.current = null;
       }
@@ -162,6 +192,8 @@ export default function useBleRelay(options = {}) {
     peers,
     relayerPeers: getRelayerPeers(),
     relayerRole,
+    selectedRelayer,
+    isScanning,
     startScanning,
     stopScanning,
     service: serviceRef.current,

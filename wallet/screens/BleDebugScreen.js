@@ -1,6 +1,6 @@
 import React, { useMemo } from "react"
-import { View, Text, StyleSheet, FlatList, ScrollView } from "react-native"
-import useBleStackDemo from "../hooks/useBleStackDemo"
+import { View, Text, StyleSheet, ScrollView } from "react-native"
+import useBleRelay from "../hooks/useBleRelay"
 import CustomButton from "../components/CustomButton"
 import CustomCard from "../components/CustomCard"
 import { theme } from "../theme"
@@ -12,11 +12,13 @@ function renderDevice({ item }) {
         {item.name} ({item.id})
       </Text>
       <Text style={styles.deviceDetail}>RSSI: {item.rssi ?? "n/a"}</Text>
-      <Text style={styles.deviceDetail}>MTU: {item.mtu ?? "n/a"}</Text>
-      <Text style={styles.deviceDetail}>Service UUIDs: {item.serviceUUIDs?.join(", ") || "—"}</Text>
-      {item.manufacturerData ? (
-        <Text style={styles.deviceDetail}>Manufacturer: {item.manufacturerData}</Text>
-      ) : null}
+      <Text style={styles.deviceDetail}>
+        Role: {item.role & 0x04 ? "Relayer" : item.role & 0x02 ? "Online" : "Offline"}
+      </Text>
+      <Text style={styles.deviceDetail}>
+        Truncated Address: {item.truncatedAddress || "—"}
+      </Text>
+      <Text style={styles.deviceDetail}>Last seen: {new Date(item.lastSeen).toLocaleTimeString()}</Text>
     </CustomCard>
   )
 }
@@ -51,44 +53,58 @@ function Header({ status, adapterState, error, onReset, supportInfo }) {
 }
 
 export default function BleDebugScreen() {
-  const ble = useBleStackDemo({ autoStart: false })
+  const ble = useBleRelay({ autoStart: false })
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <Header
-        status={ble.status}
-        adapterState={ble.adapterState}
+        status={ble.isScanning ? "scanning" : ble.isInitialized ? (ble.error ? "error" : "ready") : "idle"}
+        adapterState={ble.relayerRole.canRelay ? "relayer" : ble.relayerRole.isOnline ? "online" : "offline"}
         error={ble.error}
-        onReset={ble.reset}
-        supportInfo={ble.supportInfo}
+        onReset={ble.stopScanning}
+        supportInfo={{ supported: ble.isSupported, message: ble.error }}
       />
       <View style={styles.actionsRow}>
         <CustomButton
           title="Start Scan"
-          onPress={ble.startScan}
-          disabled={!ble.isSupported || ble.status === "scanning"}
+          onPress={ble.startScanning}
+          disabled={!ble.isSupported || ble.isScanning}
           style={styles.actionButton}
         />
         <CustomButton
           title="Stop Scan"
-          onPress={ble.stopScan}
-          disabled={ble.status !== "scanning"}
+          onPress={ble.stopScanning}
+          disabled={!ble.isScanning}
           variant="outline"
           style={styles.actionButton}
         />
       </View>
       <Text style={styles.sectionTitle}>Discovered Devices</Text>
-      {ble.devices.length === 0 ? (
+      {ble.peers.length === 0 ? (
         <CustomCard>
           <Text style={styles.emptyText}>No devices discovered yet.</Text>
         </CustomCard>
       ) : (
         <View style={styles.devicesContainer}>
-          {ble.devices.map((device, index) => (
-            <View key={device.id}>{renderDevice({ item: device })}</View>
-          ))}
+      {ble.peers.map((peer) => (
+        <View key={peer.id}>{renderDevice({ item: peer })}</View>
+      ))}
         </View>
       )}
+      <CustomCard>
+        <Text style={styles.selectedRelayerTitle}>Selected Relayer</Text>
+        {ble.selectedRelayer ? (
+          <View>
+            <Text style={styles.deviceDetail}>Name: {ble.selectedRelayer.name}</Text>
+            <Text style={styles.deviceDetail}>RSSI: {ble.selectedRelayer.rssi ?? "n/a"}</Text>
+            <Text style={styles.deviceDetail}>
+              Truncated Address: {ble.selectedRelayer.truncatedAddress || "—"}
+            </Text>
+          </View>
+        ) : (
+          <Text style={styles.deviceDetail}>None</Text>
+        )}
+      </CustomCard>
     </ScrollView>
   )
 }
