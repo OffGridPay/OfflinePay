@@ -36,7 +36,18 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-sqlite", "expo-secure-store", "react-native-ble-plx"],
+    "plugins": [
+      "expo-sqlite", 
+      "expo-secure-store", 
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": ["peripheral", "central"],
+          "bluetoothAlwaysPermission": "Allow $(PRODUCT_NAME) to connect and advertise to nearby devices"
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "60789dd8-01d9-4d8f-8078-6474161fcc05"
