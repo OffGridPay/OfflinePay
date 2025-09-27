@@ -3,7 +3,7 @@
  * Handles advertising, scanning, handshakes, and payload transfer
  */
 
-import { Platform } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 
 let BlePlx;
 try {
@@ -49,6 +49,14 @@ export class BleRelayerService {
       throw new Error('BLE not supported - react-native-ble-plx unavailable');
     }
 
+    // Request BLE permissions on Android
+    if (Platform.OS === 'android') {
+      const hasPermissions = await this.requestBlePermissions();
+      if (!hasPermissions) {
+        throw new Error('BLE permissions not granted');
+      }
+    }
+
     try {
       this.manager = new BlePlx.BleManager({
         restoreStateIdentifier: 'OfflinePayRelayer',
@@ -65,6 +73,46 @@ export class BleRelayerService {
     } catch (error) {
       this.logger.error('[ble-relay] initialization failed:', error);
       throw error;
+    }
+  }
+
+  async requestBlePermissions() {
+    try {
+      // For Android 12+ (API 31+)
+      if (Platform.Version >= 31) {
+        const permissions = [
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        ];
+
+        const results = await PermissionsAndroid.requestMultiple(permissions);
+        
+        const allGranted = permissions.every(permission => 
+          results[permission] === PermissionsAndroid.RESULTS.GRANTED
+        );
+
+        this.logger.info('[ble-relay] permission results:', results);
+        return allGranted;
+      } else {
+        // For older Android versions
+        const locationResult = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          {
+            title: 'Location Permission',
+            message: 'This app needs location permission to scan for nearby devices via Bluetooth.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+
+        return locationResult === PermissionsAndroid.RESULTS.GRANTED;
+      }
+    } catch (error) {
+      this.logger.error('[ble-relay] permission request failed:', error);
+      return false;
     }
   }
 
