@@ -35,6 +35,10 @@ function mapDevice(device) {
   };
 }
 
+const INITIAL_SUPPORT = BleManager
+  ? { supported: true, reason: null, message: null }
+  : { supported: false, reason: 'missing-js-module', message: 'react-native-ble-plx JS module unavailable' };
+
 export default function useBleStackDemo(options = {}) {
   const { autoStart, scanFilters, maxDevices, logger } = useMemo(
     () => ({ ...DEFAULT_OPTIONS, ...options }),
@@ -44,12 +48,13 @@ export default function useBleStackDemo(options = {}) {
   const managerRef = useRef(null);
   const scanStartedAt = useRef(null);
   const stateSubscriptionRef = useRef(null);
-  const [status, setStatus] = useState(() => (BleManager ? 'idle' : 'unsupported'));
+  const [supportInfo, setSupportInfo] = useState(INITIAL_SUPPORT);
+  const [status, setStatus] = useState(() => (INITIAL_SUPPORT.supported ? 'idle' : 'unsupported'));
   const [adapterState, setAdapterState] = useState('unknown');
   const [error, setError] = useState(null);
   const [devices, setDevices] = useState([]);
 
-  const isSupported = Boolean(BleManager);
+  const isSupported = supportInfo.supported;
 
   const stopScan = useCallback(() => {
     if (!managerRef.current) {
@@ -128,12 +133,28 @@ export default function useBleStackDemo(options = {}) {
   }, [isSupported]);
 
   useEffect(() => {
-    if (!isSupported) {
-      logger.warn('[ble-demo] BLE manager unavailable');
+    if (!BleManager) {
+      logger.warn('[ble-demo] BLE libraries missing from bundle');
+      setSupportInfo({ supported: false, reason: 'missing-js-module', message: 'react-native-ble-plx not installed or not linked' });
       return () => {};
     }
 
-    const manager = new BleManager({ restoreStateIdentifier: 'OfflinePayBleDemo', restoreStateFunction: null });
+    let manager;
+    try {
+      manager = new BleManager({ restoreStateIdentifier: 'OfflinePayBleDemo', restoreStateFunction: null });
+      setSupportInfo({ supported: true, reason: null, message: null });
+    } catch (managerError) {
+      logger.warn('[ble-demo] failed to instantiate BleManager. Native module unavailable?', managerError);
+      setSupportInfo({
+        supported: false,
+        reason: 'native-module-unavailable',
+        message: 'BLE native module missing (Expo Go or unlinked build). Build a development client / bare workflow to use scanning.',
+      });
+      setStatus('unsupported');
+      setError('native-module-unavailable');
+      return () => {};
+    }
+
     managerRef.current = manager;
     logger.info('[ble-demo] manager created', { platform: Platform.OS });
 
@@ -147,11 +168,13 @@ export default function useBleStackDemo(options = {}) {
       if (stateSubscriptionRef.current) {
         stateSubscriptionRef.current.remove();
       }
-      manager.destroy();
+      if (manager) {
+        manager.destroy();
+      }
       managerRef.current = null;
       logger.info('[ble-demo] manager destroyed');
     };
-  }, [isSupported, logger, stopScan]);
+  }, [logger, stopScan]);
 
   useEffect(() => {
     if (autoStart) {
@@ -169,6 +192,7 @@ export default function useBleStackDemo(options = {}) {
     startScan,
     stopScan,
     reset,
+    supportInfo,
   };
 }
 

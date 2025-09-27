@@ -2,19 +2,22 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, FlatList, Button } from 'react-native';
 import useBleStackDemo from '../hooks/useBleStackDemo';
 
-const renderDevice = ({ item }) => (
-  <View style={styles.deviceCard}>
-    <Text style={styles.deviceName} selectable>{item.name} ({item.id})</Text>
-    <Text style={styles.deviceDetail}>RSSI: {item.rssi ?? 'n/a'}</Text>
-    <Text style={styles.deviceDetail}>MTU: {item.mtu ?? 'n/a'}</Text>
-    <Text style={styles.deviceDetail}>Service UUIDs: {item.serviceUUIDs?.join(', ') || '—'}</Text>
-    {item.manufacturerData ? (
-      <Text style={styles.deviceDetail}>Manufacturer: {item.manufacturerData}</Text>
-    ) : null}
-  </View>
-);
 
-function Header({ status, adapterState, error, onReset }) {
+function renderDevice({ item }) {
+  return (
+    <View style={styles.deviceCard}>
+      <Text style={styles.deviceName} selectable>{item.name} ({item.id})</Text>
+      <Text style={styles.deviceDetail}>RSSI: {item.rssi ?? 'n/a'}</Text>
+      <Text style={styles.deviceDetail}>MTU: {item.mtu ?? 'n/a'}</Text>
+      <Text style={styles.deviceDetail}>Service UUIDs: {item.serviceUUIDs?.join(', ') || '—'}</Text>
+      {item.manufacturerData ? (
+        <Text style={styles.deviceDetail}>Manufacturer: {item.manufacturerData}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function Header({ status, adapterState, error, onReset, supportInfo }) {
   const statusText = useMemo(() => {
     switch (status) {
       case 'scanning':
@@ -31,6 +34,11 @@ function Header({ status, adapterState, error, onReset }) {
       <Text style={styles.headerTitle}>BLE Demo</Text>
       <Text style={styles.headerSubtitle}>Status: {statusText}</Text>
       <Text style={styles.headerSubtitle}>Adapter State: {adapterState}</Text>
+      {!supportInfo.supported ? (
+        <Text style={styles.warningText}>
+          {supportInfo.message || 'BLE scanning requires a development build (Expo Go not supported).'}
+        </Text>
+      ) : null}
       {error ? <Text style={styles.errorText}>Error: {error}</Text> : null}
       <Button title="Reset" onPress={onReset} />
     </View>
@@ -42,7 +50,13 @@ export default function BleDebugScreen() {
 
   return (
     <View style={styles.container}>
-      <Header status={ble.status} adapterState={ble.adapterState} error={ble.error} onReset={ble.reset} />
+      <Header
+        status={ble.status}
+        adapterState={ble.adapterState}
+        error={ble.error}
+        onReset={ble.reset}
+        supportInfo={ble.supportInfo}
+      />
       <View style={styles.actionsRow}>
         <Button title="Start Scan" onPress={ble.startScan} disabled={!ble.isSupported || ble.status === 'scanning'} />
         <Button title="Stop Scan" onPress={ble.stopScan} disabled={ble.status !== 'scanning'} />
@@ -77,6 +91,10 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     color: '#cbd5f5',
     marginBottom: 4,
+  },
+  warningText: {
+    color: '#facc15',
+    marginBottom: 8,
   },
   errorText: {
     color: '#f87171',

@@ -195,6 +195,21 @@ FR-29 Provide developer debug screen to view mesh topology and device roles.
   - Connection orchestration when transferring large payloads.
 - Document which concepts can be adapted for OfflinePay Phase 2 multi-hop (FR-optional) vs MVP.
 - Capture risks: battery impact of continuous mesh operation, iOS background restrictions, data rate limits (~1-2 kbps per connection).
+- **Research Summary**:
+  - BitChat uses BLE advertisements with a custom service UUID broadcasting compact payloads containing sender ID, hop-count (`TTL`), and checksum. Messages propagate through multi-hop relays, each device decrementing the TTL before re-advertising.
+  - Deduplication achieved via a rolling Bloom filter keyed by message hash to avoid re-forwarding.
+  - Data plane relies on switching to GATT connections for payloads > 20 bytes, with chunking handled application-side; mesh is primarily for discovery and short control messages.
+  - Energy optimization: adaptive duty cycling—devices slow advertisement intervals when few peers detected; wake up more frequently upon message receipt.
+- **Execution Plan**:
+  1. Collect source snippets / whitepapers (BitChat GitHub, blog posts) and archive references in knowledge base.
+  2. Tabulate features vs OfflinePay requirements (auto-discovery, relay TTL, dedupe strategy) noting which apply to Phase 1 vs Phase 2 roadmap.
+  3. Prototype pseudocode for message cache + TTL handling to evaluate feasibility in React Native environment (AsyncStorage/SQLite).
+  4. Identify risk register: battery drain (expected +20% with aggressive intervals), iOS 13 background advertisement limitations, regulatory constraints on advertisement payload size.
+  5. Produce briefing document summarizing adoptable techniques and open questions for multi-hop (e.g., trust model, sybil protection).
+- **Deliverables**:
+  - Comparative matrix (BitChat vs OfflinePay) listing mesh features and adoption decisions.
+  - Draft pseudocode for message dedupe cache and TTL management.
+  - Risk log entry for mesh vs MVP.
 
 ### 11.4 Beacoin Workflow Learnings (T0.4)
 
@@ -202,6 +217,21 @@ FR-29 Provide developer debug screen to view mesh topology and device roles.
 - Note UX elements: device availability indicators, PIN confirmation screens, acknowledgement timelines.
 - Analyze how Beacoin secures BLE channel (encryption, authentication) and whether they rely on central server for final settlement.
 - Produce UX recommendations for OfflinePay: e.g., optional transaction PIN before BLE send, aliasing relayer devices, progress indicators for dual acknowledgements.
+- **Research Summary**:
+  - Beacoin leverages BLE beacons broadcasting merchant IDs; app auto-detects nearby merchants and displays status cards with distance indicators (based on RSSI).
+  - Transactions require user-entered PIN, with offline signing and encrypted payload sent to beacon/merchant device; acknowledgement includes merchant signature and timestamp.
+  - UX highlights dual-phase confirmation: “Payment sent” followed by “Merchant confirmed”, giving users confidence in offline flow.
+  - Security relies on pre-shared merchant certificates embedded in the app, plus rotating session keys negotiated via beacon handshake.
+- **Execution Plan**:
+  1. Capture screenshots / flow descriptions from Beacoin documentation and classify UI patterns (discovery list, confirmation modals, error states).
+  2. Map Beacoin security steps to OfflinePay requirements (transaction PIN, handshake prompts, acknowledgement screens).
+  3. Draft UX/UI recommendations: relayer badge, progress timeline, optional PIN gating, warning for untrusted relayers.
+  4. Evaluate feasibility of pre-provisioned relayer certificates vs dynamic trust (wallet-signed introspection).
+  5. Update product backlog with UX enhancements informed by Beacoin (e.g., aliasing relayer devices, user consent before broadcast).
+- **Deliverables**:
+  - UX reference document with annotated Beacoin patterns.
+  - Recommendation list for OfflinePay UI/UX and security prompts.
+  - Decision memo on adopting PIN gating and relayer identity surfacing.
 
 ### 11.5 Architecture & Sequence Deliverables (T0.5)
 
@@ -211,6 +241,16 @@ FR-29 Provide developer debug screen to view mesh topology and device roles.
   - Error handling path (invalid signature, chunk failure) showing retries and user prompts.
 - Update high-level architecture diagram to include Connectivity Service, BLE Manager, Transaction Orchestrator, and Node.js relayer interactions.
 - Define data contracts (JSON schemas) for receipt ACK, broadcast ACK, and BLE chunk headers; align with FR-9 through FR-17.
+- **Execution Plan**:
+  1. Draft mermaid-based sequence diagrams (to be embedded in docs) for the three core flows; validate with engineering team.
+  2. Create architecture diagram (e.g., Whimsical / Excalidraw) showing modules: ConnectivityService, BleMeshManager, TransactionOrchestrator, Persistence, Relayer API.
+  3. Define JSON schemas for `PayloadChunk`, `ReceiptAck`, `BroadcastAck`, including required fields, signatures, and validation rules.
+  4. Review diagrams against requirements to ensure coverage of role transitions, retries, and error messaging.
+  5. Publish architecture pack in repository docs (`docs/architecture/phase0`) for stakeholder review.
+- **Deliverables**:
+  - Three sequence diagrams (sender→relayer flow, relayer failover, error/retry path).
+  - System context/architecture diagram.
+  - Draft JSON schemas for BLE payload/ACK structures.
 
 ### 11.6 BLE Service Definition Draft (T0.6)
 
@@ -221,5 +261,15 @@ FR-29 Provide developer debug screen to view mesh topology and device roles.
 - Outline handshake steps using ECDH (wallet public keys) producing AES-GCM session key; include nonce/timestamp for replay protection per FR-21.
 - Assess bonding requirements per platform; document fallback (application-level encryption if BLE link not bonded).
 - Prepare experiment plan to validate MTU limits, throughput, and error recovery on representative devices.
+- **Execution Plan**:
+  1. Assign preliminary 128-bit UUIDs (temporary namespace) and document characteristic properties (Write, Notify, Indicate) plus max payload sizes per MTU.
+  2. Specify chunk header format (bytes: `[sessionId(4)][seq(2)][flags(1)][payloadChecksum(2)]`).
+  3. Detail handshake protocol steps: ECDH key exchange, challenge-response for relayer authentication, session key derivation (HKDF), and message nonce strategy.
+  4. Evaluate platform-specific bonding flows (Android JustWorks/BLE pairing vs iOS LESC) and decide when to request pairing.
+  5. Design validation experiments: measure MTU negotiation success on Android/iOS, throughput tests for different intervals, and error injection for retransmission logic.
+- **Deliverables**:
+  - BLE service definition document (UUIDs, characteristics, permissions, data formats).
+  - Handshake flow description with cryptographic primitives and pseudocode.
+  - Experiment checklist + metric targets for MTU/throughput/reliability.
 
 
