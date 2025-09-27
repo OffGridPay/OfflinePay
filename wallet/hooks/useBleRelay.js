@@ -88,14 +88,16 @@ export default function useBleRelay(options = {}) {
     const service = serviceRef.current;
     if (!service || !isInitialized) {
       logger.warn('[ble-relay-hook] service not ready for scanning');
+      setError('BLE service not initialized');
       return;
     }
 
     try {
+      setError(null); // Clear any previous errors
       await service.startScanning();
     } catch (scanError) {
       logger.error('[ble-relay-hook] start scanning failed:', scanError);
-      setError(scanError.message);
+      setError(`Scan failed: ${scanError.message}`);
     }
   }, [isInitialized, logger]);
 

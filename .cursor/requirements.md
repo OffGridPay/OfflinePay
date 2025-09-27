@@ -97,11 +97,20 @@ FR-27 Maintain accessibility: voiceover labels for statuses, color contrast for 
 FR-28 Log BLE events (discoveries, connection drops, transfer bytes) with log levels and upload when device regains internet.
 FR-29 Provide developer debug screen to view mesh topology and device roles.
 
+### 5.9 Balance Synchronization (Relayer Integration)
+
+FR-30 Online relayer device must expose an authenticated HTTPS endpoint that accepts a wallet address and returns the latest native balance plus FlowEVM protocol state (nonce, deposit, active flag) retrieved from the `LINProtocolEVM` contract reference implementation.
+FR-31 Offline devices must request balance snapshots via BLE payloads; the online relayer fetches balances from RPC, signs the response, and returns both native and smart-contract balances for caching until direct connectivity resumes.
+FR-32 Mobile app must distinguish between offline-relayer derived balances and backend-fetched balances, surfacing last-refresh timestamps and data source in UI state.
+FR-33 When device regains internet connectivity, app must refresh balances directly from backend API and reconcile with locally cached relayer snapshots (discarding stale entries older than 2 minutes).
+FR-34 Relayer balance endpoint must validate checksum addresses, guard against RPC errors, and provide signed acknowledgements for auditability.
+
 ## 6. Integration Requirements
 
 - **Mobile App**: Extend BLE utilities, state management (Redux/Zustand), existing QR flows, UI screens.
 - **Relayer Device**: New module to orchestrate validation and HTTP handoff to Node.js relayer.
 - **Server Relayer**: Optional updates to accept BLE origin metadata, store device IDs, and issue double acknowledgements.
+- **Balance Sync Service**: Extend Node.js relayer to expose `/balance` API powered by FlowEVM RPC, align response schema with app expectations, and ensure signatures traceable to relayer key.
 - **Database**: Update schema to store BLE acknowledgements (receipt + broadcast), with link to transaction record.
 
 ## 7. Non-Functional Requirements
@@ -271,5 +280,22 @@ FR-29 Provide developer debug screen to view mesh topology and device roles.
   - BLE service definition document (UUIDs, characteristics, permissions, data formats).
   - Handshake flow description with cryptographic primitives and pseudocode.
   - Experiment checklist + metric targets for MTU/throughput/reliability.
+
+### 11.7 Relayer Balance Sync Proposal (T0.7)
+
+- Document how the Node.js relayer (Phase 1 foundation) exposes a `POST /balance` endpoint wrapping FlowEVM RPC and `LINProtocolEVM` contract queries.
+- Define signed balance snapshot structure consumable by BLE acknowledgements and online backend.
+- Outline reconciliation workflow between offline snapshots and online backend refresh, including timestamp tolerance, source prioritization, and failure fallback.
+- Capture security considerations: address validation, rate limiting, acknowledgement signatures, and audit logs.
+- **Execution Plan**:
+  1. Produce API spec (OpenAPI snippet) detailing request/response schema and signature semantics.
+  2. Prototype balance fetch using `ethers.js` contract calls (`getBalance`, `getUserAccount`, `getDepositBalance`).
+  3. Measure RPC latency and plan caching strategy (per-address TTL, stale fallback) for constrained relayer devices.
+  4. Define BLE payload schema for balance requests/responses, including `dataSource`, `timestamp`, and signature fields for FR-30 through FR-34 compliance.
+  5. Summarize residual risks (RPC throttling, contract unavailable) and mitigation (retry with exponential backoff, error ACK format).
+- **Deliverables**:
+  - Relayer balance sync proposal document referencing FlowEVM contract functions.
+  - Draft OpenAPI definition for `/balance` endpoint.
+  - Risk log and caching strategy notes.
 
 

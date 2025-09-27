@@ -8,6 +8,7 @@
 - T0.4 Assess Beacoin offline payment workflow for security and UX references.
 - T0.5 Finalize architecture diagram and sequence flows for payload transfer and acknowledgements.
 - T0.6 Define BLE service UUIDs, characteristic schema, chunking strategy, and security handshake protocol.
+- T0.7 Draft relayer balance synchronization plan covering `/balance` API, signed snapshots, and reconciliation workflow with backend refresh.
 
 ## Phase 1 – Foundations (Weeks 2-3)
 
@@ -17,6 +18,7 @@
 - T1.4 Prototype BLE payload channel with chunking + checksum, including retry logic.
 - T1.5 Implement secure session handshake (ECDH key exchange, session key derivation) and mutual authentication.
 - T1.6 Provide developer diagnostics screen showing detected devices, roles, RSSI, session logs.
+- T1.7 Extend Node.js relayer to expose FlowEVM balance snapshot endpoint with contract integration and signature support.
 
 ## Phase 2 – Transaction Relay Integration (Weeks 4-5)
 
@@ -26,6 +28,7 @@
 - T2.4 Connect relayer device to Node.js relayer REST API; handle success/failure responses.
 - T2.5 Implement Broadcast ACK generation and BLE delivery back to originator/counterparty.
 - T2.6 Persist acknowledgements in SQLite; update transaction history and UI feedback.
+- T2.7 Implement offline balance request/response handling via BLE, leveraging `/balance` endpoint and maintaining signed cache entries.
 
 ## Phase 3 – UX & Reliability (Weeks 6-7)
 
@@ -34,6 +37,7 @@
 - T3.3 Optimize power usage: tune scan intervals, background modes, and idle behavior.
 - T3.4 Implement analytics/log upload when device online; include BLE metrics and error codes.
 - T3.5 Add localization strings and accessibility tags for new UI elements.
+- T3.6 Display balance data source (offline relayer vs backend) and last refreshed timestamps in wallet screens.
 
 ## Phase 4 – Testing & Launch Prep (Weeks 8-9)
 
@@ -42,6 +46,7 @@
 - T4.3 Conduct security review: penetration test for BLE MITM, replay, and spoofing scenarios.
 - T4.4 Update documentation: architecture diagrams, setup guides, troubleshooting for BLE relayer mode.
 - T4.5 Run pilot with 3-4 devices; collect metrics and iterate on UX/power tuning.
+- T4.6 Validate balance reconciliation flow across offline/online transitions; include regression tests for cached snapshot expiry and signature verification.
 
 ## Phase 5 – Future Enhancements (Backlog)
 
