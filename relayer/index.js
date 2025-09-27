@@ -9,22 +9,47 @@ app.use(cors());
 app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
-const REQUIRED_ENV_VARS = ['RPC_URL', 'RELAYER_PRIVATE_KEY', 'CONTRACT_ADDRESS'];
+const REQUIRED_ENV_VARS = ['RELAYER_PRIVATE_KEY', 'CONTRACT_ADDRESS'];
+
+const DEFAULT_RPC_URL = 'https://testnet.evm.nodes.onflow.org';
+const DEFAULT_CHAIN_ID = 545;
+const DEFAULT_NETWORK_NAME = 'flowevm-testnet';
+const IS_DEV = process.env.RELAYER_LOG_REQUESTS === 'true' || process.env.NODE_ENV !== 'production';
 
 validateEnv();
 
+const rpcUrl = process.env.RPC_URL || DEFAULT_RPC_URL;
+
 // Setup Ethereum provider, relayer wallet, and contract instance
-const provider = new ethers.providers.JsonRpcProvider(process.env.RPC_URL);
+const provider = new ethers.providers.StaticJsonRpcProvider(rpcUrl, {
+  name: DEFAULT_NETWORK_NAME,
+  chainId: DEFAULT_CHAIN_ID,
+});
 const relayerWallet = new ethers.Wallet(process.env.RELAYER_PRIVATE_KEY, provider);
 const contractAddress = ethers.utils.getAddress(process.env.CONTRACT_ADDRESS);
-const LIN_PROTOCOL_ABI = [
+const OFFGRIDPAY_PROTOCOL_ABI = [
   'function getBalance(address user) view returns (uint256)',
   'function getDepositBalance(address user) view returns (uint256)',
   'function getUserAccount(address user) view returns (tuple(uint256 balance,uint256 flowDeposit,uint256 nonce,uint256 lastSyncTime,bool isActive,address publicKeyAddress))'
 ];
-const linProtocolContract = new ethers.Contract(contractAddress, LIN_PROTOCOL_ABI, provider);
+const OFFGRIDPAYProtocolContract = new ethers.Contract(contractAddress, OFFGRIDPAY_PROTOCOL_ABI, provider);
 
 console.log(`Relayer address: ${relayerWallet.address}`);
+
+if (IS_DEV) {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      const payload = req.method === 'GET' ? { query: req.query } : { query: req.query, body: req.body };
+      console.log(
+        `[relayer][${req.method}] ${req.originalUrl} -> ${res.statusCode} (${duration}ms)`,
+        payload
+      );
+    });
+    next();
+  });
+}
 
 // Root endpoint to check if the server is running
 app.get('/', (req, res) => {
@@ -43,49 +68,14 @@ app.get('/health', async (req, res) => {
 /**
  * Provide on-demand account state for devices that cannot reach the blockchain directly.
  */
+app.get('/balance', async (req, res) => {
+  const { walletAddress, includeContractAccount } = req.query;
+  await handleBalanceRequest({ walletAddress, includeContractAccount, res });
+});
+
 app.post('/balance', async (req, res) => {
-  const { walletAddress, includeContractAccount = true } = req.body;
-
-  if (!walletAddress) {
-    return res.status(400).json({ error: 'Missing walletAddress field' });
-  }
-
-  if (!ethers.utils.isAddress(walletAddress)) {
-    return res.status(400).json({ error: 'Invalid walletAddress provided' });
-  }
-
-  try {
-    const checksumAddress = ethers.utils.getAddress(walletAddress);
-
-    const nativeBalancePromise = provider.getBalance(checksumAddress);
-    const contractBalancePromise = includeContractAccount
-      ? linProtocolContract.getUserAccount(checksumAddress)
-      : Promise.resolve(null);
-
-    const [nativeBalanceWei, contractAccount] = await Promise.all([
-      nativeBalancePromise,
-      contractBalancePromise
-    ]);
-
-    const responsePayload = {
-      walletAddress: checksumAddress,
-      nativeBalance: {
-        wei: nativeBalanceWei.toString(),
-        ether: ethers.utils.formatEther(nativeBalanceWei)
-      }
-    };
-
-    if (contractAccount) {
-      responsePayload.protocolAccount = formatUserAccount(contractAccount);
-      responsePayload.protocolAccount.balanceEther = responsePayload.protocolAccount.balanceFormatted;
-      delete responsePayload.protocolAccount.balanceFormatted;
-    }
-
-    res.json(responsePayload);
-  } catch (error) {
-    console.error('Failed to fetch balance snapshot:', error);
-    res.status(500).json({ error: 'Failed to fetch balance', details: error.message });
-  }
+  const { walletAddress, includeContractAccount } = req.body || {};
+  await handleBalanceRequest({ walletAddress, includeContractAccount, res });
 });
 
 /**
@@ -167,13 +157,17 @@ function validateEnv() {
     console.error(`Missing required environment variables: ${missing.join(', ')}`);
     process.exit(1);
   }
+
+  if (!process.env.RPC_URL) {
+    console.warn(`[relayer] RPC_URL not set. Falling back to ${DEFAULT_RPC_URL}`);
+  }
 }
 
 async function buildAccountSnapshot(walletAddress) {
   const checksumAddress = ethers.utils.getAddress(walletAddress);
   const [nativeBalanceWei, userAccount] = await Promise.all([
     provider.getBalance(checksumAddress),
-    linProtocolContract.getUserAccount(checksumAddress)
+    OFFGRIDPAYProtocolContract.getUserAccount(checksumAddress)
   ]);
 
   const formattedAccount = formatUserAccount(userAccount);
@@ -196,14 +190,84 @@ function formatUserAccount(account) {
 
   return {
     balanceWei: balance.toString(),
-    balanceFormatted: ethers.utils.formatEther(balance),
+    balanceEther: ethers.utils.formatEther(balance),
     flowDepositWei: flowDeposit.toString(),
-    flowDeposit: ethers.utils.formatEther(flowDeposit),
+    flowDepositEther: ethers.utils.formatEther(flowDeposit),
     nonce: toBigNumber(account.nonce).toString(),
     lastSyncTime: toBigNumber(account.lastSyncTime).toString(),
     isActive: Boolean(account.isActive),
     publicKeyAddress: account.publicKeyAddress
   };
+}
+
+async function handleBalanceRequest({ walletAddress, includeContractAccount, res }) {
+  if (!walletAddress) {
+    return res.status(400).json({ error: 'Missing walletAddress field' });
+  }
+
+  if (!ethers.utils.isAddress(walletAddress)) {
+    return res.status(400).json({ error: 'Invalid walletAddress provided' });
+  }
+
+  try {
+    const include = includeContractAccount !== undefined ? includeContractAccount !== false && includeContractAccount !== 'false' : true;
+    const snapshot = await buildBalanceSnapshot(walletAddress, include);
+    res.json(snapshot);
+  } catch (error) {
+    console.error('Failed to fetch balance snapshot:', error);
+    res.status(500).json({ error: 'Failed to fetch balance', details: error.message });
+  }
+}
+
+async function buildBalanceSnapshot(walletAddress, includeContractAccount = true) {
+  const checksumAddress = ethers.utils.getAddress(walletAddress);
+  const nativeBalanceWei = await provider.getBalance(checksumAddress);
+
+  const snapshot = {
+    walletAddress: checksumAddress,
+    nativeBalance: {
+      wei: nativeBalanceWei.toString(),
+      ether: ethers.utils.formatEther(nativeBalanceWei)
+    },
+    protocolAccount: null,
+    timestamp: Math.floor(Date.now() / 1000),
+    signer: relayerWallet.address,
+    dataSource: 'relayer'
+  };
+
+  if (includeContractAccount) {
+    const contractAccount = await OFFGRIDPAYProtocolContract.getUserAccount(checksumAddress);
+    snapshot.protocolAccount = formatUserAccount(contractAccount);
+  }
+
+  const digest = computeBalanceSnapshotDigest(snapshot);
+  const signature = await relayerWallet.signMessage(ethers.utils.arrayify(digest));
+
+  return { ...snapshot, digest, signature };
+}
+
+function computeBalanceSnapshotDigest(snapshot) {
+  const nativeBalanceWei = ethers.BigNumber.from(snapshot.nativeBalance.wei || 0);
+  const protocol = snapshot.protocolAccount;
+  const protocolBalanceWei = protocol ? ethers.BigNumber.from(protocol.balanceWei) : ethers.constants.Zero;
+  const protocolDepositWei = protocol ? ethers.BigNumber.from(protocol.flowDepositWei) : ethers.constants.Zero;
+  const protocolNonce = protocol ? ethers.BigNumber.from(protocol.nonce) : ethers.constants.Zero;
+  const isActive = protocol ? protocol.isActive : false;
+  const lastSyncTime = protocol ? ethers.BigNumber.from(protocol.lastSyncTime || 0) : ethers.constants.Zero;
+
+  return ethers.utils.solidityKeccak256(
+    ['address', 'uint256', 'uint256', 'uint256', 'uint256', 'bool', 'uint256', 'uint256'],
+    [
+      snapshot.walletAddress,
+      nativeBalanceWei,
+      protocolBalanceWei,
+      protocolDepositWei,
+      protocolNonce,
+      isActive,
+      lastSyncTime,
+      ethers.BigNumber.from(snapshot.timestamp)
+    ]
+  );
 }
 
 function toBigNumber(value) {

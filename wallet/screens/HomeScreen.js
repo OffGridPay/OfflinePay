@@ -1,10 +1,11 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, Button, StyleSheet, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { fetchWallet, fetchAcks } from '../utils/db';
+import { fetchWallet, fetchAcks, fetchLatestBalanceSnapshot, upsertBalanceSnapshot, purgeOldBalanceSnapshots } from '../utils/db';
 import { ethers } from 'ethers';
 import { useConnectivity } from '../context/ConnectivityContext';
 import useBleRelay from '../hooks/useBleRelay';
+import { RELAYER_BASE_URL } from '../config/env';
 
 function getConnectivityBadgeStyle(connectivity) {
   const base = {
@@ -35,13 +36,181 @@ function getBleStatusBadgeStyle(canRelay) {
   };
 }
 
+function formatBalanceSource(source) {
+  switch (source) {
+    case 'relayer':
+      return 'Online relayer API';
+    case 'relayer-native':
+      return 'Relayer native balance';
+    case 'acknowledgement':
+      return 'Latest transaction acknowledgement';
+    case 'protocol-balance':
+      return 'Protocol account balance';
+    case 'protocol-deposit':
+      return 'Protocol deposit balance';
+    case 'relayer-cache':
+      return 'Cached relayer snapshot';
+    case 'unknown':
+      return 'Unknown';
+    default:
+      return source;
+  }
+}
+
+function extractBalanceFromSnapshot(snapshot) {
+  if (!snapshot) {
+    return {
+      amount: '0.0',
+      symbol: 'FLOW',
+      source: 'unknown',
+      timestamp: null,
+      flowDeposit: null,
+      nativeBalance: null,
+    };
+  }
+
+  const timestampMs = snapshot.timestamp ? snapshot.timestamp * 1000 : Date.now();
+  const nativeBalanceEther = snapshot.nativeBalance?.ether
+    ?? snapshot.nativeBalanceEther
+    ?? (snapshot.nativeBalanceWei ? ethers.utils.formatEther(snapshot.nativeBalanceWei) : null);
+
+  let protocolAccount = snapshot.protocolAccount || null;
+  if (protocolAccount && typeof protocolAccount === 'string') {
+    try {
+      protocolAccount = JSON.parse(protocolAccount);
+    } catch {
+      protocolAccount = null;
+    }
+  }
+
+  const protocolBalanceEther = protocolAccount?.balanceEther
+    ?? (protocolAccount?.balanceWei ? ethers.utils.formatEther(protocolAccount.balanceWei) : null);
+  const protocolDepositEther = protocolAccount?.flowDepositEther
+    ?? (protocolAccount?.flowDepositWei ? ethers.utils.formatEther(protocolAccount.flowDepositWei) : null);
+
+  if (protocolBalanceEther && protocolBalanceEther !== '0' && protocolBalanceEther !== '0.0') {
+    return {
+      amount: protocolBalanceEther,
+      symbol: 'FLOW',
+      source: 'protocol-balance',
+      timestamp: timestampMs,
+      flowDeposit: protocolDepositEther,
+      nativeBalance: nativeBalanceEther,
+    };
+  }
+
+  if (protocolDepositEther && protocolDepositEther !== '0' && protocolDepositEther !== '0.0') {
+    return {
+      amount: protocolDepositEther,
+      symbol: 'FLOW',
+      source: 'protocol-deposit',
+      timestamp: timestampMs,
+      flowDeposit: protocolDepositEther,
+      nativeBalance: nativeBalanceEther,
+    };
+  }
+
+  if (nativeBalanceEther) {
+    return {
+      amount: nativeBalanceEther,
+      symbol: 'FLOW',
+      source: 'relayer-native',
+      timestamp: timestampMs,
+      flowDeposit: protocolDepositEther,
+      nativeBalance: nativeBalanceEther,
+    };
+  }
+
+  return {
+    amount: '0.0',
+    symbol: 'FLOW',
+    source: 'relayer-cache',
+    timestamp: timestampMs,
+    flowDeposit: protocolDepositEther,
+    nativeBalance: nativeBalanceEther,
+  };
+}
+
 export default function HomeScreen({ navigation }) {
   const [wallet, setWallet] = useState(null);
   const [balance, setBalance] = useState('0.000');
+  const [balanceSource, setBalanceSource] = useState('unknown');
+  const [lastBalanceUpdatedAt, setLastBalanceUpdatedAt] = useState(null);
+  const [tokenSymbol, setTokenSymbol] = useState('FLOW');
+  const [flowDeposit, setFlowDeposit] = useState(null);
   const [acks, setAcks] = useState([]);
   const [loading, setLoading] = useState(true);
   const connectivity = useConnectivity();
   const bleRelay = useBleRelay({ autoStart: true });
+
+  const applySnapshotToState = useCallback((snapshot, sourceOverride) => {
+    const parsed = extractBalanceFromSnapshot(snapshot);
+    setBalance(parsed.amount);
+    setTokenSymbol(parsed.symbol);
+    setBalanceSource(sourceOverride || parsed.source);
+    setLastBalanceUpdatedAt(parsed.timestamp || Date.now());
+    setFlowDeposit(parsed.flowDeposit);
+  }, []);
+
+  const tryLoadCachedSnapshot = useCallback(async (address) => {
+    try {
+      const snapshot = await fetchLatestBalanceSnapshot(address);
+      if (snapshot) {
+        applySnapshotToState(snapshot, snapshot.dataSource || 'relayer-cache');
+      }
+    } catch (error) {
+      console.warn('Failed to load cached balance snapshot:', error);
+    }
+  }, [applySnapshotToState]);
+
+  const fetchBalanceFromBackend = useCallback(async (address) => {
+    try {
+      const url = `${RELAYER_BASE_URL}/balance?walletAddress=${address}`;
+      const response = await fetch(url, { method: 'GET' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const snapshot = await response.json();
+      applySnapshotToState(snapshot, 'relayer');
+
+      try {
+        await upsertBalanceSnapshot(snapshot);
+        await purgeOldBalanceSnapshots(Math.floor(Date.now() / 1000) - 600); // keep last 10 minutes
+      } catch (cacheError) {
+        console.warn('Failed to cache balance snapshot:', cacheError);
+      }
+    } catch (error) {
+      console.error('Failed to fetch balance from relayer:', error);
+      await tryLoadCachedSnapshot(address);
+    }
+  }, [tryLoadCachedSnapshot]);
+
+  const refreshBalance = useCallback(async (address, acknowledgements = []) => {
+    if (!address) return;
+
+    const isOnline = connectivity.isConnected && connectivity.isInternetReachable;
+
+    if (isOnline) {
+      await fetchBalanceFromBackend(address);
+      return;
+    }
+
+    if (acknowledgements.length > 0) {
+      const latestAck = acknowledgements[0]; // Already sorted desc
+      const newBalances = JSON.parse(latestAck.newBalances);
+      const userBalance = newBalances[address];
+      if (userBalance) {
+        setBalance(userBalance);
+        setBalanceSource('acknowledgement');
+        setTokenSymbol('FLOW');
+        setFlowDeposit(null);
+        setLastBalanceUpdatedAt(Date.now());
+      }
+    }
+
+    await tryLoadCachedSnapshot(address);
+  }, [connectivity.isConnected, connectivity.isInternetReachable, fetchBalanceFromBackend, tryLoadCachedSnapshot]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -52,28 +221,30 @@ export default function HomeScreen({ navigation }) {
         const fetchedAcks = await fetchAcks();
         setAcks(fetchedAcks);
 
-        // Determine balance from the latest ack
-        if (fetchedAcks.length > 0) {
-          const latestAck = fetchedAcks[0]; // DB query is ordered by blockNumber DESC
-          const newBalances = JSON.parse(latestAck.newBalances);
-          const userBalance = newBalances[fetchedWallet.address];
-          setBalance(userBalance || '0.0');
-        } else {
-          setBalance('0.0'); // No transactions yet
-        }
+        await refreshBalance(fetchedWallet.address, fetchedAcks);
       }
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshBalance]);
 
   useFocusEffect(
     useCallback(() => {
       loadData();
     }, [loadData])
   );
+
+  useEffect(() => {
+    if (!wallet?.address) return;
+    refreshBalance(wallet.address, acks);
+  }, [acks, wallet?.address, refreshBalance]);
+
+  useEffect(() => {
+    if (!wallet?.address) return;
+    refreshBalance(wallet.address, acks);
+  }, [connectivity.isConnected, connectivity.isInternetReachable, wallet?.address, acks, refreshBalance]);
 
   const renderTxItem = ({ item }) => {
     const isSender = item.fromAddress.toLowerCase() === wallet.address.toLowerCase();
@@ -99,7 +270,16 @@ export default function HomeScreen({ navigation }) {
         <Text style={styles.addressLabel}>Your Address:</Text>
         <Text style={styles.address} selectable>{wallet ? wallet.address : 'Loading...'}</Text>
         <Text style={styles.balanceLabel}>Balance:</Text>
-        <Text style={styles.balance}>{balance} ETH</Text>
+        <Text style={styles.balance}>{balance} {tokenSymbol}</Text>
+        <Text style={styles.balanceMeta}>Source: {formatBalanceSource(balanceSource)}</Text>
+        <Text style={styles.balanceMeta}>
+          Last update: {lastBalanceUpdatedAt ? new Date(lastBalanceUpdatedAt).toLocaleString() : '—'}
+        </Text>
+        {flowDeposit ? (
+          <Text style={styles.balanceMeta}>
+            Protocol deposit: {flowDeposit} {tokenSymbol}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.actions}>
@@ -187,6 +367,7 @@ const styles = StyleSheet.create({
   address: { fontSize: 14, fontFamily: 'monospace', marginBottom: 20 },
   balanceLabel: { fontSize: 20, color: '#333' },
   balance: { fontSize: 36, fontWeight: 'bold' },
+  balanceMeta: { fontSize: 12, color: '#4b5563', marginTop: 4 },
   actions: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 20 },
   connectivityCard: {
     backgroundColor: '#1e293b',
