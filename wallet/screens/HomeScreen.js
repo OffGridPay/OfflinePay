@@ -146,6 +146,17 @@ export default function HomeScreen({ navigation }) {
   const connectivity = useConnectivity();
   const bleRelay = useBleRelay({ autoStart: true });
 
+  // Debug logging for BLE relay state
+  useEffect(() => {
+    console.log('[HomeScreen] BLE relay state:', {
+      isSupported: bleRelay.isSupported,
+      isInitialized: bleRelay.isInitialized,
+      error: bleRelay.error,
+      peers: bleRelay.peers.length,
+      relayerRole: bleRelay.relayerRole,
+    });
+  }, [bleRelay.isSupported, bleRelay.isInitialized, bleRelay.error, bleRelay.peers.length, bleRelay.relayerRole]);
+
   const applySnapshotToState = useCallback((snapshot, sourceOverride) => {
     const parsed = extractBalanceFromSnapshot(snapshot);
     setBalance(parsed.amount);
@@ -372,22 +383,54 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.detailText}>
             Nearby peers: {bleRelay.peers.length} | Relayers: {bleRelay.relayerPeers.length}
           </Text>
+          {bleRelay.selectedRelayer ? (
+            <View style={styles.selectedRelayerContainer}>
+              <Text style={styles.detailText}>
+                Selected relayer: {bleRelay.selectedRelayer.name}
+              </Text>
+              <Text style={styles.detailText}>
+                RSSI: {typeof bleRelay.selectedRelayer.rssi === "number" ? `${bleRelay.selectedRelayer.rssi} dBm` : "n/a"}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.detailText}>Selected relayer: none</Text>
+          )}
           {bleRelay.error && <Text style={styles.errorText}>Error: {bleRelay.error}</Text>}
           <View style={styles.bleActions}>
             <CustomButton
               title="Start Scan"
               onPress={bleRelay.startScanning}
-              disabled={!bleRelay.isInitialized}
+              disabled={!bleRelay.isInitialized || bleRelay.isScanning}
               style={styles.bleActionButton}
             />
             <CustomButton
               title="Stop Scan"
               onPress={bleRelay.stopScanning}
-              disabled={!bleRelay.isInitialized}
+              disabled={!bleRelay.isScanning}
               variant="outline"
               style={styles.bleActionButton}
             />
           </View>
+          {bleRelay.handshakeContexts.length > 0 && (
+            <View style={styles.handshakeContainer}>
+              <Text style={styles.detailText}>Active handshakes:</Text>
+              {bleRelay.handshakeContexts.map((ctx) => (
+                <Text key={ctx.contextId} style={styles.detailText}>
+                  · {ctx.peerId.slice(0, 8)}… (started {new Date(ctx.startedAt).toLocaleTimeString()})
+                </Text>
+              ))}
+            </View>
+          )}
+          {bleRelay.sessions.length > 0 && (
+            <View style={styles.handshakeContainer}>
+              <Text style={styles.detailText}>Active sessions:</Text>
+              {bleRelay.sessions.map((session) => (
+                <Text key={session.sessionId} style={styles.detailText}>
+                  · {session.peerId.slice(0, 8)}… ({session.role})
+                </Text>
+              ))}
+            </View>
+          )}
         </CustomCard>
       )}
 
@@ -472,6 +515,9 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.small.fontSize,
     fontWeight: "500",
   },
+  selectedRelayerContainer: {
+    marginTop: theme.spacing.xs,
+  },
   bleActions: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -479,6 +525,9 @@ const styles = StyleSheet.create({
   },
   bleActionButton: {
     flex: 0.48,
+  },
+  handshakeContainer: {
+    marginTop: theme.spacing.md,
   },
   historyTitle: {
     fontSize: theme.typography.h2.fontSize,
