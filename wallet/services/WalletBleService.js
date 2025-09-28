@@ -1,26 +1,20 @@
 /**
- * Wallet BLE Service - Complete BLE solution for peer-to-peer wallet discovery
- * Combines advertising (peripheral mode) and scanning (central mode)
- * Only discovers devices running the same wallet app
+ * Wallet BLE Service - Simplified BLE scanning for device discovery
+ * Scans for BLE devices and filters for potential wallet devices
+ * Note: Advertising functionality removed due to library compatibility issues
  */
 
-import { Platform, PermissionsAndroid, NativeEventEmitter, NativeModules } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import { BleManager } from 'react-native-ble-plx';
-import BLEAdvertiser from 'react-native-ble-advertiser';
 
-// Custom service UUID for our wallet app - ONLY devices with this app will advertise this UUID
+// Custom service UUID for our wallet app (devices with this service are wallet apps)
 export const WALLET_APP_SERVICE_UUID = '12345678-9ABC-DEF0-1234-56789ABCDEF0';
 export const WALLET_DATA_CHARACTERISTIC_UUID = '87654321-4321-4321-4321-CBA987654321';
-
-// Company ID for manufacturer data (you can register your own or use a test ID)
-const WALLET_COMPANY_ID = 0x0059; // Test company ID
 
 export const DEVICE_STATES = {
   BLUETOOTH_OFF: 'bluetooth_off',
   READY: 'ready',
-  ADVERTISING: 'advertising',
   SCANNING: 'scanning',
-  BOTH: 'both', // Both advertising and scanning
   ERROR: 'error'
 };
 
@@ -32,15 +26,12 @@ export class WalletBleService {
     // BLE Manager for scanning (central mode)
     this.bleManager = new BleManager();
     
-    // Event emitter for BLE Advertiser
-    this.advertiserEmitter = new NativeEventEmitter(NativeModules.BLEAdvertiser);
-    
     // State management
     this.state = DEVICE_STATES.BLUETOOTH_OFF;
-    this.isAdvertising = false;
     this.isScanning = false;
-    this.discoveredWalletDevices = new Map(); // Only devices with our app
+    this.discoveredWalletDevices = new Map();
     this.connectedDevices = new Map();
+    this.error = null;
     
     // Event subscribers
     this.subscribers = new Map();
@@ -51,24 +42,11 @@ export class WalletBleService {
 
   // Initialize BLE state monitoring
   _initializeStateMonitoring() {
-    // Monitor BLE Manager state changes
     this.bleManager.onStateChange((state) => {
       this.logger.info('[WalletBLE] BLE Manager state changed:', state);
       this._updateState();
       this._notifySubscribers('stateChange', { state, managerState: state });
     }, true);
-
-    // Monitor BLE Advertiser state changes
-    this.advertiserEmitter.addListener('onBTStatusChange', (enabled) => {
-      this.logger.info('[WalletBLE] BLE Advertiser state changed:', enabled);
-      this._updateState();
-      this._notifySubscribers('stateChange', { advertiserEnabled: enabled });
-    });
-
-    // Listen for discovered devices from advertiser
-    this.advertiserEmitter.addListener('onDeviceFound', (deviceData) => {
-      this._handleAdvertiserDeviceFound(deviceData);
-    });
   }
 
   // Update overall service state
@@ -77,27 +55,22 @@ export class WalletBleService {
     
     if (managerState !== 'PoweredOn') {
       this.state = DEVICE_STATES.BLUETOOTH_OFF;
-    } else if (this.isAdvertising && this.isScanning) {
-      this.state = DEVICE_STATES.BOTH;
-    } else if (this.isAdvertising) {
-      this.state = DEVICE_STATES.ADVERTISING;
     } else if (this.isScanning) {
       this.state = DEVICE_STATES.SCANNING;
     } else {
       this.state = DEVICE_STATES.READY;
     }
-
-    this._notifySubscribers('stateUpdate', { state: this.state });
+    
+    this._notifySubscribers('stateChange', { state: this.state });
   }
 
-  // Request all necessary permissions
+  // Request necessary permissions for scanning
   async requestPermissions() {
     if (Platform.OS === 'android') {
       try {
         const permissions = [
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
           PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
         ];
@@ -113,7 +86,7 @@ export class WalletBleService {
           return false;
         }
 
-        this.logger.info('[WalletBLE] All BLE permissions granted');
+        this.logger.info('[WalletBLE] BLE scanning permissions granted');
         return true;
       } catch (error) {
         this.logger.error('[WalletBLE] Permission request failed:', error);
@@ -147,73 +120,15 @@ export class WalletBleService {
     } catch (error) {
       this.logger.error('[WalletBLE] Failed to initialize:', error);
       this.state = DEVICE_STATES.ERROR;
+      this.error = error.message;
       throw error;
     }
   }
 
-  // Start advertising as a wallet app device
-  async startAdvertising() {
-    try {
-      if (this.isAdvertising) {
-        this.logger.warn('[WalletBLE] Already advertising');
-        return;
-      }
+  // Note: Advertising functionality removed due to library compatibility issues
+  // Only scanning is supported in this simplified version
 
-      this.logger.info('[WalletBLE] Starting advertising...');
-
-      // Set company ID
-      BLEAdvertiser.setCompanyId(WALLET_COMPANY_ID);
-
-      // Create manufacturer data with wallet identifier
-      const manufacturerData = [0x57, 0x41, 0x4C, 0x4C, 0x45, 0x54]; // "WALLET" in hex
-
-      // Start advertising with our custom service UUID
-      await BLEAdvertiser.broadcast(
-        [WALLET_APP_SERVICE_UUID], 
-        manufacturerData,
-        {
-          advertiseMode: BLEAdvertiser.ADVERTISE_MODE_BALANCED,
-          txPowerLevel: BLEAdvertiser.ADVERTISE_TX_POWER_MEDIUM,
-          connectable: true,
-          includeDeviceName: true,
-          includeTxPowerLevel: true
-        }
-      );
-
-      this.isAdvertising = true;
-      this._updateState();
-      
-      this.logger.info('[WalletBLE] Advertising started successfully');
-      this._notifySubscribers('advertisingStarted', {});
-
-    } catch (error) {
-      this.logger.error('[WalletBLE] Failed to start advertising:', error);
-      this._notifySubscribers('advertisingError', { error });
-      throw error;
-    }
-  }
-
-  // Stop advertising
-  async stopAdvertising() {
-    try {
-      if (!this.isAdvertising) {
-        return;
-      }
-
-      await BLEAdvertiser.stopBroadcast();
-      this.isAdvertising = false;
-      this._updateState();
-      
-      this.logger.info('[WalletBLE] Advertising stopped');
-      this._notifySubscribers('advertisingStopped', {});
-
-    } catch (error) {
-      this.logger.error('[WalletBLE] Failed to stop advertising:', error);
-      throw error;
-    }
-  }
-
-  // Start scanning for wallet app devices
+  // Start scanning for BLE devices (simplified version)
   async startScanning() {
     try {
       if (this.isScanning) {
@@ -221,28 +136,22 @@ export class WalletBleService {
         return;
       }
 
-      this.logger.info('[WalletBLE] Starting scan for wallet devices...');
+      this.logger.info('[WalletBLE] Starting BLE device scan...');
       this.discoveredWalletDevices.clear();
+      this.error = null;
 
-      // Method 1: Scan using BLE Manager for devices advertising our service UUID
-      this.bleManager.startDeviceScan([WALLET_APP_SERVICE_UUID], null, (error, device) => {
+      // Scan for all BLE devices since we can't filter by service UUID without advertising
+      this.bleManager.startDeviceScan(null, null, (error, device) => {
         if (error) {
-          this.logger.error('[WalletBLE] BLE Manager scan error:', error);
+          this.logger.error('[WalletBLE] BLE scan error:', error);
+          this.error = error.message;
+          this._notifySubscribers('scanningError', { error });
           return;
         }
 
-        if (device) {
+        if (device && device.name) {
           this._handleBleManagerDeviceFound(device);
         }
-      });
-
-      // Method 2: Scan using BLE Advertiser for manufacturer data
-      BLEAdvertiser.setCompanyId(WALLET_COMPANY_ID);
-      await BLEAdvertiser.scanByService([WALLET_APP_SERVICE_UUID], {
-        scanMode: BLEAdvertiser.SCAN_MODE_BALANCED,
-        matchMode: BLEAdvertiser.MATCH_MODE_AGGRESSIVE,
-        numberOfMatches: BLEAdvertiser.MATCH_NUM_MAX_ADVERTISEMENT,
-        reportDelay: 0
       });
 
       this.isScanning = true;
@@ -260,6 +169,7 @@ export class WalletBleService {
 
     } catch (error) {
       this.logger.error('[WalletBLE] Failed to start scanning:', error);
+      this.error = error.message;
       this._notifySubscribers('scanningError', { error });
       throw error;
     }
@@ -273,7 +183,6 @@ export class WalletBleService {
       }
 
       this.bleManager.stopDeviceScan();
-      await BLEAdvertiser.stopScan();
       
       this.isScanning = false;
       this._updateState();
@@ -293,35 +202,36 @@ export class WalletBleService {
       return; // Skip devices without name or ID
     }
 
+    // Filter for potential wallet devices (you can customize this logic)
+    const isLikelyWalletDevice = this._isLikelyWalletDevice(device);
+    
     const walletDevice = {
       id: device.id,
       name: device.name,
       rssi: device.rssi,
       isConnectable: device.isConnectable,
       lastSeen: Date.now(),
-      source: 'ble_manager',
+      source: 'ble_scan',
       serviceUUIDs: device.serviceUUIDs || [],
+      isLikelyWallet: isLikelyWalletDevice,
       rawDevice: device
     };
 
     this._addWalletDevice(walletDevice);
   }
 
-  // Handle device found via BLE Advertiser
-  _handleAdvertiserDeviceFound(deviceData) {
-    const walletDevice = {
-      id: deviceData.address || deviceData.id,
-      name: deviceData.name || 'Unknown Wallet Device',
-      rssi: deviceData.rssi,
-      isConnectable: true,
-      lastSeen: Date.now(),
-      source: 'ble_advertiser',
-      manufacturerData: deviceData.manufacturerData,
-      serviceUUIDs: deviceData.serviceUUIDs || [],
-      rawDevice: deviceData
-    };
-
-    this._addWalletDevice(walletDevice);
+  // Simple heuristic to identify potential wallet devices
+  _isLikelyWalletDevice(device) {
+    // Check if device has our wallet service UUID
+    if (device.serviceUUIDs && device.serviceUUIDs.includes(WALLET_APP_SERVICE_UUID)) {
+      return true;
+    }
+    
+    // Check device name for wallet-related keywords
+    const walletKeywords = ['wallet', 'pay', 'crypto', 'bitcoin', 'ethereum'];
+    const deviceName = device.name.toLowerCase();
+    
+    return walletKeywords.some(keyword => deviceName.includes(keyword));
   }
 
   // Add or update wallet device
@@ -452,16 +362,31 @@ export class WalletBleService {
     return Array.from(this.connectedDevices.values());
   }
 
-  // Start both advertising and scanning
+  // Start scanning (advertising not supported)
   async startBoth() {
-    await this.startAdvertising();
     await this.startScanning();
   }
 
-  // Stop both advertising and scanning
+  // Stop scanning
   async stopBoth() {
-    await this.stopAdvertising();
     await this.stopScanning();
+  }
+
+  // Advertising methods (not supported in this version)
+  async startAdvertising() {
+    this.logger.warn('[WalletBLE] Advertising not supported in this version');
+    return Promise.resolve();
+  }
+
+  async stopAdvertising() {
+    this.logger.warn('[WalletBLE] Advertising not supported in this version');
+    return Promise.resolve();
+  }
+
+  // Clear discovered devices
+  clearDiscoveredDevices() {
+    this.discoveredWalletDevices.clear();
+    this._notifySubscribers('devicesCleared', {});
   }
 
   // Subscribe to events
@@ -498,15 +423,18 @@ export class WalletBleService {
 
   // Cleanup
   destroy() {
-    this.stopBoth().catch(error => {
+    this.stopScanning().catch(error => {
       this.logger.error('[WalletBLE] Cleanup error:', error);
     });
 
     // Disconnect all devices
     for (const deviceId of this.connectedDevices.keys()) {
-      this.connectedDevices.get(deviceId).device.cancelConnection().catch(error => {
-        this.logger.error('[WalletBLE] Cleanup disconnect error:', error);
-      });
+      const connectionInfo = this.connectedDevices.get(deviceId);
+      if (connectionInfo && connectionInfo.device) {
+        connectionInfo.device.cancelConnection().catch(error => {
+          this.logger.error('[WalletBLE] Cleanup disconnect error:', error);
+        });
+      }
     }
 
     this.subscribers.clear();

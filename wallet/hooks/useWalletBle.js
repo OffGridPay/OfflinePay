@@ -1,6 +1,7 @@
 /**
  * React hook for Wallet BLE functionality
- * Provides easy-to-use interface for discovering and connecting to other wallet app users
+ * Provides easy-to-use interface for scanning and connecting to BLE devices
+ * Note: Advertising functionality removed due to library compatibility issues
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -12,7 +13,7 @@ export default function useWalletBle(options = {}) {
   const serviceRef = useRef(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [state, setState] = useState(DEVICE_STATES.BLUETOOTH_OFF);
-  const [isAdvertising, setIsAdvertising] = useState(false);
+  const [isAdvertising, setIsAdvertising] = useState(false); // Always false in this version
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
   const [discoveredWalletDevices, setDiscoveredWalletDevices] = useState([]);
@@ -29,34 +30,16 @@ export default function useWalletBle(options = {}) {
       const service = new WalletBleService({ logger, walletAddress });
       
       // Subscribe to events
-      service.subscribe('stateUpdate', ({ state }) => {
-        setState(state);
-      });
-
       service.subscribe('stateChange', (data) => {
         logger.info('[useWalletBle] BLE state changed:', data);
-        if (data.state && data.state !== 'PoweredOn') {
-          setError(`Bluetooth is ${data.state}. Please enable Bluetooth.`);
+        if (data.state) {
+          setState(data.state);
+        }
+        if (data.managerState && data.managerState !== 'PoweredOn') {
+          setError(`Bluetooth is ${data.managerState}. Please enable Bluetooth.`);
         } else {
           setError(null);
         }
-      });
-
-      service.subscribe('advertisingStarted', () => {
-        setIsAdvertising(true);
-        setError(null);
-        logger.info('[useWalletBle] Advertising started');
-      });
-
-      service.subscribe('advertisingStopped', () => {
-        setIsAdvertising(false);
-        logger.info('[useWalletBle] Advertising stopped');
-      });
-
-      service.subscribe('advertisingError', ({ error }) => {
-        setError(`Advertising failed: ${error.message}`);
-        setIsAdvertising(false);
-        logger.error('[useWalletBle] Advertising error:', error);
       });
 
       service.subscribe('scanningStarted', () => {
