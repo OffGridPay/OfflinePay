@@ -415,9 +415,9 @@ const styles = StyleSheet.create({
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { padding: 20, alignItems: 'center', backgroundColor: '#f0f0f0', borderRadius: 10 },
   addressLabel: { fontSize: 16, color: '#666' },
-  address: { fontSize: 14, fontFamily: 'monospace', marginBottom: 20 },
+  address: { fontSize: 14, fontFamily: 'monospace', marginBottom: 20, color: theme.colors.success },
   balanceLabel: { fontSize: 20, color: '#333' },
-  balance: { fontSize: 36, fontWeight: 'bold' },
+  balance: { fontSize: 36, fontWeight: 'bold', color: theme.colors.success },
   balanceMeta: { fontSize: 12, color: '#4b5563', marginTop: 4 },
   actions: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 20 },
   connectivityCard: {
